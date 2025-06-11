@@ -1,0 +1,6 @@
+{
+  "source": "aws.events",
+  "detail-type": "Scheduled Event",
+  "detail": {},
+  "comment": "This is a test event for manual Lambda invocation"
+}

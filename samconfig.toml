@@ -1,0 +1,16 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "AWSDeltaCostUsage"
+resolve_s3 = true
+s3_prefix = "aws-cost-monitor"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = [
+    "EmailTo=jimmycpocock+AWSBilling@gmail.com",
+    "EmailFrom=noreply@awscostmonitor.com",
+    "AnomalyThresholdPercent=50",
+    "AnomalyThresholdDollars=50",
+    "AIServiceMultiplier=0.5"
+]

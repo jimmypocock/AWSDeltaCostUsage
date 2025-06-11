@@ -1,0 +1,135 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: AWS Cost Monitor - Sends cost reports and anomaly alerts every 6 hours
+
+Parameters:
+  EmailTo:
+    Type: String
+    Description: Email address to receive cost reports (comma-separated for multiple)
+  
+  EmailFrom:
+    Type: String
+    Description: Email address to send reports from (must be verified in SES)
+  
+  AnomalyThresholdPercent:
+    Type: Number
+    Default: 50
+    Description: Percentage increase to trigger anomaly alert
+  
+  AnomalyThresholdDollars:
+    Type: Number
+    Default: 50
+    Description: Dollar amount increase to trigger anomaly alert
+  
+  AIServiceMultiplier:
+    Type: Number
+    Default: 0.5
+    Description: Multiplier for AI service thresholds (lower = more sensitive)
+
+Globals:
+  Function:
+    Timeout: 300
+    MemorySize: 512
+    Runtime: python3.12
+
+Resources:
+  CostMonitorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: aws-cost-monitor
+      CodeUri: src/
+      Handler: lambda_function.lambda_handler
+      Environment:
+        Variables:
+          EMAIL_TO: !Ref EmailTo
+          EMAIL_FROM: !Ref EmailFrom
+          ANOMALY_THRESHOLD_PERCENT: !Ref AnomalyThresholdPercent
+          ANOMALY_THRESHOLD_DOLLARS: !Ref AnomalyThresholdDollars
+          AI_SERVICE_MULTIPLIER: !Ref AIServiceMultiplier
+      Events:
+        ScheduledEvent:
+          Type: Schedule
+          Properties:
+            Name: cost-monitor-6-hour-schedule
+            Description: Trigger cost monitor every 6 hours
+            Schedule: rate(6 hours)
+            Enabled: true
+      Policies:
+        # Cost Explorer permissions
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - ce:GetCostAndUsage
+                - ce:GetCostForecast
+                - ce:GetDimensionValues
+                - ce:GetTags
+              Resource: '*'
+        
+        # Organizations permissions for multi-account
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - organizations:ListAccounts
+                - organizations:DescribeAccount
+                - organizations:DescribeOrganization
+              Resource: '*'
+        
+        # SES permissions for sending emails
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - ses:SendRawEmail
+              Resource: '*'
+              Condition:
+                StringEquals:
+                  ses:FromAddress: !Ref EmailFrom
+        
+        # CloudWatch Logs permissions
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/aws-cost-monitor*'
+
+  # Log Group for the Lambda function
+  CostMonitorLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${CostMonitorFunction}'
+      RetentionInDays: 14
+
+Outputs:
+  FunctionArn:
+    Description: ARN of the Cost Monitor Lambda function
+    Value: !GetAtt CostMonitorFunction.Arn
+  
+  FunctionName:
+    Description: Name of the Cost Monitor Lambda function
+    Value: !Ref CostMonitorFunction
+  
+  ScheduleRuleName:
+    Description: Name of the EventBridge schedule rule
+    Value: cost-monitor-6-hour-schedule
+  
+  NextSteps:
+    Description: Next steps to complete setup
+    Value: !Sub |
+      1. Verify the sender email address in SES:
+         - Go to SES console and verify: ${EmailFrom}
+         - Also verify the recipient address: ${EmailTo}
+      
+      2. If using a custom domain for EmailFrom:
+         - Set up domain verification in SES
+         - Configure SPF/DKIM records
+      
+      3. After deployment:
+         - Check CloudWatch Logs for any errors
+         - Manually test by invoking the Lambda function
+         - Wait for the first scheduled run or trigger manually
