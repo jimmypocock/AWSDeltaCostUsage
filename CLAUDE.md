@@ -57,7 +57,7 @@ aws cloudformation delete-stack --stack-name AWSDeltaCostUsage
 
 ## Architecture Overview
 
-This AWS Lambda function monitors AWS costs across all accounts in an AWS Organization and sends email alerts for anomalies. It runs every 6 hours via EventBridge.
+This AWS Lambda function monitors AWS costs across all accounts in an AWS Organization and sends email alerts for anomalies. It runs at specific times daily (7 AM, 1 PM, 6 PM, 11 PM CT) via EventBridge.
 
 ### Key Components:
 - **src/lambda_function.py**: Main Lambda handler that:
@@ -70,7 +70,7 @@ This AWS Lambda function monitors AWS costs across all accounts in an AWS Organi
 - **template.yaml**: SAM template defining:
   - Lambda function with 5-minute timeout
   - Python 3.12 runtime
-  - EventBridge schedule (every 6 hours)
+  - EventBridge schedule (7 AM, 1 PM, 6 PM, 11 PM Central Time)
   - IAM permissions for Cost Explorer, Organizations, and SES
   - Environment variables for configuration (no hardcoded emails)
 

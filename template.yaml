@@ -50,9 +50,16 @@ Resources:
         ScheduledEvent:
           Type: Schedule
           Properties:
-            Name: cost-monitor-6-hour-schedule
-            Description: Trigger cost monitor every 6 hours
-            Schedule: rate(6 hours)
+            Name: cost-monitor-daily-schedule
+            Description: Trigger cost monitor at 7AM, 1PM, 6PM, 11PM CT
+            # Cron format: cron(Minutes Hours Day-of-month Month Day-of-week Year)
+            # Central Time to UTC conversion:
+            # 7 AM CT = 1 PM UTC (CST) / 12 PM UTC (CDT)
+            # 1 PM CT = 7 PM UTC (CST) / 6 PM UTC (CDT)
+            # 6 PM CT = 12 AM UTC (CST) / 11 PM UTC (CDT)
+            # 11 PM CT = 5 AM UTC (CST) / 4 AM UTC (CDT)
+            # Using CST times (will shift 1 hour during DST)
+            Schedule: cron(0 13,19,0,5 * * ? *)
             Enabled: true
       Policies:
         # Cost Explorer permissions
