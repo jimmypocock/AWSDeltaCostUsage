@@ -23,9 +23,10 @@ Please describe the tests that you ran to verify your changes. Provide instructi
 - [ ] Tested with multiple AWS accounts (if applicable)
 
 **Test Configuration**:
-* AWS Region:
-* Python version:
-* Number of accounts tested:
+
+- AWS Region:
+- Python version:
+- Number of accounts tested:
 
 ## Checklist:
 

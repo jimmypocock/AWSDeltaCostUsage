@@ -17,6 +17,7 @@ Please report security vulnerabilities by creating a private security advisory o
 3. Fill out the form with as much detail as possible
 
 Please include:
+
 - Type of issue (e.g., IAM permission escalation, data exposure, etc.)
 - Full paths of source file(s) related to the manifestation of the issue
 - The location of the affected source code (tag/branch/commit or direct URL)
@@ -30,15 +31,18 @@ Please include:
 This Lambda function requires several AWS permissions to operate. When deploying:
 
 1. **Principle of Least Privilege**: The Lambda function only has permissions it needs:
+
    - Read-only access to Cost Explorer
    - Read-only access to Organizations
    - Send email via SES (restricted to verified addresses)
 
-2. **Email Security**: 
+2. **Email Security**:
+
    - Only verified email addresses can be used
    - SES permissions are restricted to the configured sender address
 
 3. **Configuration Security**:
+
    - Never commit `.env` files with real email addresses
    - Use AWS Secrets Manager for production deployments if needed
    - Rotate IAM credentials regularly
@@ -51,6 +55,7 @@ This Lambda function requires several AWS permissions to operate. When deploying
 ## Response Timeline
 
 We will strive to:
+
 - Confirm receipt of your vulnerability report within 2 business days
 - Provide an initial assessment within 5 business days
 - Release a fix as soon as possible, depending on complexity
