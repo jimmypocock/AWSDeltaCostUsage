@@ -81,7 +81,8 @@ def validate_email_addresses(email_list):
 def calculate_email_hash(subject, body, recipients):
     """Calculate hash of email content for deduplication"""
     content = f"{subject}{body}{','.join(sorted(recipients))}"
-    return hashlib.md5(content.encode()).hexdigest()
+    # Using SHA256 for better security, even though this is just for deduplication
+    return hashlib.sha256(content.encode()).hexdigest()
 
 
 def check_ses_sending_quota(ses_client=None):
