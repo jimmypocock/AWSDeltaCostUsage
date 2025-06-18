@@ -16,9 +16,23 @@ retry_config = Config(
 )
 
 # Initialize AWS clients with retry configuration
-ce_client = boto3.client("ce", config=retry_config)
-ses_client = boto3.client("ses", config=retry_config)
-org_client = boto3.client("organizations", config=retry_config)
+# Defer client creation to avoid issues in testing
+ce_client = None
+ses_client = None
+org_client = None
+
+
+def get_clients():
+    """Initialize AWS clients if not already initialized"""
+    global ce_client, ses_client, org_client
+    if ce_client is None:
+        ce_client = boto3.client("ce", config=retry_config)
+    if ses_client is None:
+        ses_client = boto3.client("ses", config=retry_config)
+    if org_client is None:
+        org_client = boto3.client("organizations", config=retry_config)
+    return ce_client, ses_client, org_client
+
 
 # Configuration
 EMAIL_FROM = os.environ.get("EMAIL_FROM", "noreply@awscostmonitor.com")
@@ -50,6 +64,9 @@ def lambda_handler(event, context):
     Note: Lambda has a 5-minute timeout configured in template.yaml which acts as
     an absolute safety limit for any runaway operations.
     """
+    # Initialize clients
+    get_clients()
+
     try:
         # Get date ranges
         # Include today's data (even if partial) for more up-to-date reporting
@@ -104,6 +121,9 @@ def lambda_handler(event, context):
 def get_organization_accounts() -> List[Dict]:
     """Get all accounts in the organization"""
     accounts = []
+    # Ensure client is initialized
+    if org_client is None:
+        get_clients()
     paginator = org_client.get_paginator("list_accounts")
 
     for page in paginator.paginate():
@@ -128,6 +148,10 @@ def get_costs_by_service_and_account(
     next_page_token = None
     page_count = 0
     max_pages = 10  # Safety limit - Cost Explorer shouldn't have more than 10 pages
+
+    # Ensure client is initialized
+    if ce_client is None:
+        get_clients()
 
     while page_count < max_pages:
         try:
@@ -341,10 +365,14 @@ def generate_email_body(
     <head>
         <style>
             body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
-            .header {{ background-color: #232f3e; color: white; padding: 20px; text-align: center; }}
-            .alert {{ background-color: #ff5252; color: white; padding: 15px; margin: 10px 0; border-radius: 5px; }}
-            .warning {{ background-color: #ff9800; color: white; padding: 15px; margin: 10px 0; border-radius: 5px; }}
-            .summary {{ background-color: #f5f5f5; padding: 20px; margin: 20px 0; border-radius: 5px; }}
+            .header {{ background-color: #232f3e; color: white; padding: 20px;
+                     text-align: center; }}
+            .alert {{ background-color: #ff5252; color: white; padding: 15px;
+                     margin: 10px 0; border-radius: 5px; }}
+            .warning {{ background-color: #ff9800; color: white; padding: 15px;
+                       margin: 10px 0; border-radius: 5px; }}
+            .summary {{ background-color: #f5f5f5; padding: 20px; margin: 20px 0;
+                      border-radius: 5px; }}
             .increase {{ color: #d32f2f; font-weight: bold; }}
             .decrease {{ color: #388e3c; font-weight: bold; }}
             table {{ border-collapse: collapse; width: 100%; margin: 20px 0; }}
@@ -399,9 +427,11 @@ def generate_email_body(
                {current_date.strftime('%I:%M %p')} today</p>
             <p><strong>Total Cost:</strong> ${analysis['total_current']:.2f}</p>
             <p><strong>Previous Period:</strong> ${analysis['total_previous']:.2f}</p>
-            <p><strong>Change:</strong> <span class="{delta_class}">{delta_symbol}${analysis['total_delta']:.2f} \
-({delta_symbol}{analysis['total_delta_percent']:.1f}%)</span></p>
-            <p><em>Note: AWS Cost Explorer may have up to 24-hour delay in reporting some costs.</em></p>
+            <p><strong>Change:</strong>
+               <span class="{delta_class}">{delta_symbol}${analysis['total_delta']:.2f}
+               ({delta_symbol}{analysis['total_delta_percent']:.1f}%)</span></p>
+            <p><em>Note: AWS Cost Explorer may have up to 24-hour delay in reporting
+               some costs.</em></p>
         </div>
     """
 
@@ -456,8 +486,12 @@ def generate_email_body(
                     <td class="service-name">{service}</td>
                     <td>${service_data['current']:.2f}</td>
                     <td>${service_data['previous']:.2f}</td>
-                    <td class="{delta_class}">{delta_symbol}${service_data['delta']:.2f}</td>
-                    <td class="{delta_class}">{delta_symbol}{service_data['delta_percent']:.1f}%</td>
+                    <td class="{delta_class}">
+                        {delta_symbol}${service_data['delta']:.2f}
+                    </td>
+                    <td class="{delta_class}">
+                        {delta_symbol}{service_data['delta_percent']:.1f}%
+                    </td>
                 </tr>
                 """
 
@@ -467,8 +501,10 @@ def generate_email_body(
     html += """
         <div class="footer">
             <p>This report is generated at 7 AM, 1 PM, 6 PM, and 11 PM Central Time daily.</p>
-            <p>Yellow highlighted rows indicate AI services which are monitored with stricter thresholds.</p>
-            <p>To modify alert thresholds or frequency, update the Lambda function environment variables.</p>
+            <p>Yellow highlighted rows indicate AI services which are monitored with
+               stricter thresholds.</p>
+            <p>To modify alert thresholds or frequency, update the Lambda function
+               environment variables.</p>
         </div>
     </body>
     </html>
@@ -481,6 +517,10 @@ def send_email(subject: str, body: str):
     """Send email via SES with safety checks"""
     # Import safety utilities
     from email_safety import EmailRateLimiter, safe_send_email
+
+    # Ensure client is initialized
+    if ses_client is None:
+        get_clients()
 
     # Create rate limiter (in Lambda, this is per-execution, but still helps)
     rate_limiter = EmailRateLimiter(max_emails_per_hour=10)
@@ -501,6 +541,10 @@ def send_email(subject: str, body: str):
 
 def send_error_email(error_message: str):
     """Send error notification email"""
+    # Ensure client is initialized
+    if ses_client is None:
+        get_clients()
+
     try:
         ses_client.send_email(
             Source=EMAIL_FROM,
@@ -512,7 +556,10 @@ def send_error_email(error_message: str):
                 },
                 "Body": {
                     "Text": {
-                        "Data": f"An error occurred in the AWS Cost Monitor Lambda function:\n\n{error_message}",
+                        "Data": (
+                            f"An error occurred in the AWS Cost Monitor Lambda "
+                            f"function:\n\n{error_message}"
+                        ),
                         "Charset": "UTF-8",
                     }
                 },

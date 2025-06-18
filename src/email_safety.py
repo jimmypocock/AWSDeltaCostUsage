@@ -11,7 +11,9 @@ from botocore.exceptions import ClientError
 # Initialize DynamoDB for tracking sent emails (optional)
 # Uncomment if you want to use DynamoDB for deduplication
 # dynamodb = boto3.resource('dynamodb')
-# email_tracking_table = dynamodb.Table(os.environ.get('EMAIL_TRACKING_TABLE', 'cost-monitor-emails'))
+# email_tracking_table = dynamodb.Table(
+#     os.environ.get('EMAIL_TRACKING_TABLE', 'cost-monitor-emails')
+# )
 
 
 class EmailRateLimiter:
@@ -82,9 +84,10 @@ def calculate_email_hash(subject, body, recipients):
     return hashlib.md5(content.encode()).hexdigest()
 
 
-def check_ses_sending_quota():
+def check_ses_sending_quota(ses_client=None):
     """Check if we're within SES sending limits"""
-    ses_client = boto3.client("ses")
+    if ses_client is None:
+        ses_client = boto3.client("ses")
 
     try:
         response = ses_client.get_send_quota()
@@ -107,9 +110,10 @@ def check_ses_sending_quota():
         return True
 
 
-def is_bounce_or_complaint_suppressed(email_address):
+def is_bounce_or_complaint_suppressed(email_address, ses_client=None):
     """Check if email is on SES suppression list"""
-    ses_client = boto3.client("sesv2")
+    if ses_client is None:
+        ses_client = boto3.client("sesv2")
 
     try:
         response = ses_client.get_suppressed_destination(EmailAddress=email_address)
@@ -140,17 +144,19 @@ def safe_send_email(
         return False, None, "No valid recipient email addresses"
 
     # Filter out suppressed emails
+    # Create a sesv2 client for suppression checks
+    sesv2_client = boto3.client("sesv2") if ses_client else None
     active_recipients = [
         email
         for email in valid_recipients
-        if not is_bounce_or_complaint_suppressed(email)
+        if not is_bounce_or_complaint_suppressed(email, sesv2_client)
     ]
 
     if not active_recipients:
         return False, None, "All recipients are on suppression list"
 
     # Check SES quota
-    if not check_ses_sending_quota():
+    if not check_ses_sending_quota(ses_client):
         return False, None, "SES sending quota exceeded"
 
     # Check rate limiting (if enabled)
@@ -177,7 +183,8 @@ def safe_send_email(
             rate_limiter.record_email_sent(email_hash)
 
         print(
-            f"Email sent successfully to {len(active_recipients)} recipients. Message ID: {message_id}"
+            f"Email sent successfully to {len(active_recipients)} recipients. "
+            f"Message ID: {message_id}"
         )
         return True, message_id, None
 
