@@ -87,13 +87,16 @@ class TestLambdaIntegration:
         def get_cost_side_effect(**kwargs):
             granularity = kwargs.get("Granularity", "DAILY")
             start_date = kwargs["TimePeriod"]["Start"]
-            
+
             if granularity == "HOURLY":
                 # Today's hourly data
                 return {
                     "ResultsByTime": [
                         {
-                            "TimePeriod": {"Start": "2024-06-11T00:00:00Z", "End": "2024-06-11T01:00:00Z"},
+                            "TimePeriod": {
+                                "Start": "2024-06-11T00:00:00Z",
+                                "End": "2024-06-11T01:00:00Z",
+                            },
                             "Groups": [
                                 {
                                     "Keys": ["Amazon EC2", "123456789012"],
@@ -103,10 +106,13 @@ class TestLambdaIntegration:
                                     "Keys": ["Amazon Bedrock", "123456789012"],
                                     "Metrics": {"UnblendedCost": {"Amount": "5.00"}},
                                 },
-                            ]
+                            ],
                         },
                         {
-                            "TimePeriod": {"Start": "2024-06-11T01:00:00Z", "End": "2024-06-11T02:00:00Z"},
+                            "TimePeriod": {
+                                "Start": "2024-06-11T01:00:00Z",
+                                "End": "2024-06-11T02:00:00Z",
+                            },
                             "Groups": [
                                 {
                                     "Keys": ["Amazon EC2", "123456789012"],
@@ -116,8 +122,8 @@ class TestLambdaIntegration:
                                     "Keys": ["Amazon Bedrock", "123456789012"],
                                     "Metrics": {"UnblendedCost": {"Amount": "5.00"}},
                                 },
-                            ]
-                        }
+                            ],
+                        },
                     ]
                 }
             elif start_date == "2024-06-10":
@@ -238,19 +244,24 @@ class TestLambdaIntegration:
         def get_cost_side_effect(**kwargs):
             granularity = kwargs.get("Granularity", "DAILY")
             start_date = kwargs["TimePeriod"]["Start"]
-            
+
             if granularity == "HOURLY":
                 # Today's data with AI service spike
                 return {
                     "ResultsByTime": [
                         {
-                            "TimePeriod": {"Start": f"2024-06-11T{i:02d}:00:00Z", "End": f"2024-06-11T{i+1:02d}:00:00Z"},
+                            "TimePeriod": {
+                                "Start": f"2024-06-11T{i:02d}:00:00Z",
+                                "End": f"2024-06-11T{i+1:02d}:00:00Z",
+                            },
                             "Groups": [
                                 {
                                     "Keys": ["Amazon Bedrock", "123456789012"],
-                                    "Metrics": {"UnblendedCost": {"Amount": "50.00"}},  # High cost per hour
+                                    "Metrics": {
+                                        "UnblendedCost": {"Amount": "50.00"}
+                                    },  # High cost per hour
                                 },
-                            ]
+                            ],
                         }
                         for i in range(18)  # 18 hours of data
                     ]
@@ -263,7 +274,9 @@ class TestLambdaIntegration:
                             "Groups": [
                                 {
                                     "Keys": ["Amazon Bedrock", "123456789012"],
-                                    "Metrics": {"UnblendedCost": {"Amount": "100.00"}},  # Normal daily cost
+                                    "Metrics": {
+                                        "UnblendedCost": {"Amount": "100.00"}
+                                    },  # Normal daily cost
                                 },
                             ]
                         }
@@ -304,31 +317,31 @@ class TestLambdaIntegration:
                 # Verify alert email was sent
                 subject = mock_send_email.call_args[0][0]
                 body = mock_send_email.call_args[0][1]
-                
+
                 # Should have anomaly alert in subject
                 assert "Alert" in subject or "Anomalies" in subject
-                
+
                 # Should mention Bedrock in the body
                 assert "Amazon Bedrock" in body
                 assert "alert" in body.lower() or "anomal" in body.lower()
 
     def test_timezone_handling(self, setup_aws_environment, lambda_context):
         """Test different timezone configurations"""
-        
+
         # Test with different timezones
         for timezone in ["US/Eastern", "Europe/London", "Asia/Tokyo"]:
             os.environ["USER_TIMEZONE"] = timezone
-            
+
             from unittest.mock import MagicMock, patch
-            
+
             org_client = boto3.client("organizations", region_name="us-east-1")
             org_client.create_organization(FeatureSet="ALL")
-            
+
             ses_client = boto3.client("ses", region_name="us-east-1")
             ses_client.verify_email_identity(EmailAddress="noreply@awscostmonitor.com")
-            
+
             mock_ce_client = MagicMock()
-            
+
             # Create a proper response structure
             def mock_ce_response(**kwargs):
                 if kwargs.get("Granularity") == "HOURLY":
@@ -338,9 +351,9 @@ class TestLambdaIntegration:
                             {
                                 "TimePeriod": {
                                     "Start": f"2024-06-11T{i:02d}:00:00Z",
-                                    "End": f"2024-06-11T{i+1:02d}:00:00Z"
+                                    "End": f"2024-06-11T{i+1:02d}:00:00Z",
                                 },
-                                "Groups": []
+                                "Groups": [],
                             }
                             for i in range(8)  # 8 hours of data
                         ]
@@ -352,18 +365,18 @@ class TestLambdaIntegration:
                             {
                                 "TimePeriod": {
                                     "Start": kwargs["TimePeriod"]["Start"],
-                                    "End": kwargs["TimePeriod"]["End"]
+                                    "End": kwargs["TimePeriod"]["End"],
                                 },
-                                "Groups": []
+                                "Groups": [],
                             }
                         ]
                     }
-            
+
             mock_ce_client.get_cost_and_usage.side_effect = mock_ce_response
-            
+
             with patch("boto3.client") as mock_boto_client:
                 with patch("lambda_function.send_email") as mock_send_email:
-                    
+
                     def client_factory(service_name, **kwargs):
                         if service_name == "ce":
                             return mock_ce_client
@@ -372,21 +385,21 @@ class TestLambdaIntegration:
                         elif service_name == "organizations":
                             return org_client
                         return MagicMock()
-                    
+
                     mock_boto_client.side_effect = client_factory
-                    
+
                     import importlib
                     import lambda_function
-                    
+
                     importlib.reload(lambda_function)
                     lambda_function.send_email = mock_send_email
-                    
+
                     # Execute the Lambda
                     result = lambda_function.lambda_handler({}, lambda_context)
-                    
+
                     # Verify successful execution
                     assert result["statusCode"] == 200
-                    
+
                     # Verify timezone is mentioned in email
                     body = mock_send_email.call_args[0][1]
                     assert timezone in body
@@ -394,17 +407,17 @@ class TestLambdaIntegration:
     @freeze_time("2024-06-11 13:00:00")
     def test_four_period_reporting(self, setup_aws_environment, lambda_context):
         """Test that all four time periods are included in the report"""
-        
+
         org_client = boto3.client("organizations", region_name="us-east-1")
         org_client.create_organization(FeatureSet="ALL")
-        
+
         ses_client = boto3.client("ses", region_name="us-east-1")
         ses_client.verify_email_identity(EmailAddress="noreply@awscostmonitor.com")
-        
+
         from unittest.mock import MagicMock, patch
-        
+
         mock_ce_client = MagicMock()
-        
+
         # Create a proper response structure
         def mock_ce_response(**kwargs):
             if kwargs.get("Granularity") == "HOURLY":
@@ -414,14 +427,14 @@ class TestLambdaIntegration:
                         {
                             "TimePeriod": {
                                 "Start": f"2024-06-11T{i:02d}:00:00Z",
-                                "End": f"2024-06-11T{i+1:02d}:00:00Z"
+                                "End": f"2024-06-11T{i+1:02d}:00:00Z",
                             },
                             "Groups": [
                                 {
                                     "Keys": ["Amazon EC2", "123456789012"],
                                     "Metrics": {"UnblendedCost": {"Amount": "10.00"}},
                                 }
-                            ]
+                            ],
                         }
                         for i in range(8)  # 8 hours of data
                     ]
@@ -433,23 +446,23 @@ class TestLambdaIntegration:
                         {
                             "TimePeriod": {
                                 "Start": kwargs["TimePeriod"]["Start"],
-                                "End": kwargs["TimePeriod"]["End"]
+                                "End": kwargs["TimePeriod"]["End"],
                             },
                             "Groups": [
                                 {
                                     "Keys": ["Amazon EC2", "123456789012"],
                                     "Metrics": {"UnblendedCost": {"Amount": "100.00"}},
                                 }
-                            ]
+                            ],
                         }
                     ]
                 }
-        
+
         mock_ce_client.get_cost_and_usage.side_effect = mock_ce_response
-        
+
         with patch("boto3.client") as mock_boto_client:
             with patch("lambda_function.send_email") as mock_send_email:
-                
+
                 def client_factory(service_name, **kwargs):
                     if service_name == "ce":
                         return mock_ce_client
@@ -458,27 +471,27 @@ class TestLambdaIntegration:
                     elif service_name == "organizations":
                         return org_client
                     return MagicMock()
-                
+
                 mock_boto_client.side_effect = client_factory
-                
+
                 import importlib
                 import lambda_function
-                
+
                 importlib.reload(lambda_function)
                 lambda_function.send_email = mock_send_email
-                
+
                 # Execute the Lambda
                 result = lambda_function.lambda_handler({}, lambda_context)
-                
+
                 # Verify successful execution
                 assert result["statusCode"] == 200
-                
+
                 # Verify email contains all four periods
                 body = mock_send_email.call_args[0][1]
                 assert "Today" in body
                 assert "Yesterday" in body
                 assert "Month to Date" in body
                 assert "Full Month" in body
-                
+
                 # Verify Cost Explorer was called 4 times
                 assert mock_ce_client.get_cost_and_usage.call_count == 4

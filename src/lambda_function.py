@@ -62,7 +62,7 @@ AI_SERVICES = [
 
 def get_timezone_aware_dates(user_tz_str: str) -> Dict[str, Tuple[str, str]]:
     """Get date ranges for various periods in the user's timezone
-    
+
     Returns a dictionary with:
     - today_so_far: midnight to current time today
     - yesterday_full: midnight to midnight yesterday
@@ -74,57 +74,75 @@ def get_timezone_aware_dates(user_tz_str: str) -> Dict[str, Tuple[str, str]]:
     except pytz.exceptions.UnknownTimeZoneError:
         print(f"Unknown timezone: {user_tz_str}, falling back to UTC")
         user_tz = pytz.UTC
-    
+
     # Get current time in user's timezone
     now_user = datetime.now(user_tz)
-    
+
     # Today so far (midnight to now in user timezone)
     today_start_user = now_user.replace(hour=0, minute=0, second=0, microsecond=0)
     today_start_utc = today_start_user.astimezone(pytz.UTC)
     now_utc = now_user.astimezone(pytz.UTC)
-    
+
     # Yesterday full day
     yesterday_user = now_user - timedelta(days=1)
-    yesterday_start_user = yesterday_user.replace(hour=0, minute=0, second=0, microsecond=0)
+    yesterday_start_user = yesterday_user.replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
     yesterday_end_user = today_start_user
     yesterday_start_utc = yesterday_start_user.astimezone(pytz.UTC)
     yesterday_end_utc = yesterday_end_user.astimezone(pytz.UTC)
-    
+
     # Month to date
-    month_start_user = now_user.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    month_start_user = now_user.replace(
+        day=1, hour=0, minute=0, second=0, microsecond=0
+    )
     month_start_utc = month_start_user.astimezone(pytz.UTC)
-    
+
     # Previous month full
     if now_user.month == 1:
-        prev_month_start_user = now_user.replace(year=now_user.year-1, month=12, day=1, hour=0, minute=0, second=0, microsecond=0)
+        prev_month_start_user = now_user.replace(
+            year=now_user.year - 1,
+            month=12,
+            day=1,
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
     else:
-        prev_month_start_user = now_user.replace(month=now_user.month-1, day=1, hour=0, minute=0, second=0, microsecond=0)
-    
+        prev_month_start_user = now_user.replace(
+            month=now_user.month - 1, day=1, hour=0, minute=0, second=0, microsecond=0
+        )
+
     prev_month_end_user = month_start_user
     prev_month_start_utc = prev_month_start_user.astimezone(pytz.UTC)
     prev_month_end_utc = prev_month_end_user.astimezone(pytz.UTC)
-    
+
     # Cost Explorer needs dates in YYYY-MM-DD format
     # For partial days, we need to fetch the full day and will handle filtering later
     return {
         "today_so_far": (
             today_start_utc.strftime("%Y-%m-%d"),
-            (now_utc + timedelta(days=1)).strftime("%Y-%m-%d"),  # Tomorrow to include today
-            now_user
+            (now_utc + timedelta(days=1)).strftime(
+                "%Y-%m-%d"
+            ),  # Tomorrow to include today
+            now_user,
         ),
         "yesterday_full": (
             yesterday_start_utc.strftime("%Y-%m-%d"),
-            yesterday_end_utc.strftime("%Y-%m-%d")
+            yesterday_end_utc.strftime("%Y-%m-%d"),
         ),
         "month_to_date": (
             month_start_utc.strftime("%Y-%m-%d"),
-            (now_utc + timedelta(days=1)).strftime("%Y-%m-%d"),  # Tomorrow to include today
-            now_user
+            (now_utc + timedelta(days=1)).strftime(
+                "%Y-%m-%d"
+            ),  # Tomorrow to include today
+            now_user,
         ),
         "previous_month_full": (
             prev_month_start_utc.strftime("%Y-%m-%d"),
-            prev_month_end_utc.strftime("%Y-%m-%d")
-        )
+            prev_month_end_utc.strftime("%Y-%m-%d"),
+        ),
     }
 
 
@@ -136,12 +154,16 @@ def lambda_handler(event, context):
     try:
         # Get date ranges for all periods
         date_ranges = get_timezone_aware_dates(USER_TIMEZONE)
-        
+
         print(f"Fetching costs for timezone: {USER_TIMEZONE}")
         print(f"Today so far: {date_ranges['today_so_far'][0]} to now")
-        print(f"Yesterday: {date_ranges['yesterday_full'][0]} to {date_ranges['yesterday_full'][1]}")
+        print(
+            f"Yesterday: {date_ranges['yesterday_full'][0]} to {date_ranges['yesterday_full'][1]}"
+        )
         print(f"Month to date: {date_ranges['month_to_date'][0]} to now")
-        print(f"Previous month: {date_ranges['previous_month_full'][0]} to {date_ranges['previous_month_full'][1]}")
+        print(
+            f"Previous month: {date_ranges['previous_month_full'][0]} to {date_ranges['previous_month_full'][1]}"
+        )
 
         # Get organization accounts
         accounts = get_organization_accounts()
@@ -149,28 +171,28 @@ def lambda_handler(event, context):
         # Fetch costs for each period
         costs_data = {
             "today_so_far": get_costs_by_service_and_account(
-                date_ranges['today_so_far'][0], 
-                date_ranges['today_so_far'][1], 
+                date_ranges["today_so_far"][0],
+                date_ranges["today_so_far"][1],
                 accounts,
                 hourly_granularity=True,
-                cutoff_time=date_ranges['today_so_far'][2]
+                cutoff_time=date_ranges["today_so_far"][2],
             ),
             "yesterday_full": get_costs_by_service_and_account(
-                date_ranges['yesterday_full'][0], 
-                date_ranges['yesterday_full'][1], 
-                accounts
+                date_ranges["yesterday_full"][0],
+                date_ranges["yesterday_full"][1],
+                accounts,
             ),
             "month_to_date": get_costs_by_service_and_account(
-                date_ranges['month_to_date'][0], 
-                date_ranges['month_to_date'][1], 
+                date_ranges["month_to_date"][0],
+                date_ranges["month_to_date"][1],
                 accounts,
-                cutoff_time=date_ranges['month_to_date'][2]
+                cutoff_time=date_ranges["month_to_date"][2],
             ),
             "previous_month_full": get_costs_by_service_and_account(
-                date_ranges['previous_month_full'][0], 
-                date_ranges['previous_month_full'][1], 
-                accounts
-            )
+                date_ranges["previous_month_full"][0],
+                date_ranges["previous_month_full"][1],
+                accounts,
+            ),
         }
 
         # Analyze costs and detect anomalies
@@ -219,8 +241,11 @@ def get_organization_accounts() -> List[Dict]:
 
 
 def get_costs_by_service_and_account(
-    start_date: str, end_date: str, accounts: List[Dict], 
-    hourly_granularity: bool = False, cutoff_time: datetime = None
+    start_date: str,
+    end_date: str,
+    accounts: List[Dict],
+    hourly_granularity: bool = False,
+    cutoff_time: datetime = None,
 ) -> Dict:
     """Get costs broken down by service and account with pagination support"""
     costs = {}
@@ -256,11 +281,13 @@ def get_costs_by_service_and_account(
             for result in response["ResultsByTime"]:
                 # Check if we should include this time period
                 if cutoff_time and hourly_granularity:
-                    result_time = datetime.strptime(result["TimePeriod"]["Start"], "%Y-%m-%dT%H:%M:%SZ")
+                    result_time = datetime.strptime(
+                        result["TimePeriod"]["Start"], "%Y-%m-%dT%H:%M:%SZ"
+                    )
                     result_time = result_time.replace(tzinfo=pytz.UTC)
                     if result_time >= cutoff_time.astimezone(pytz.UTC):
                         continue  # Skip future hours
-                
+
                 for group in result["Groups"]:
                     service = group["Keys"][0]
                     account_id = group["Keys"][1]
@@ -301,56 +328,54 @@ def calculate_percent_change(previous: float, current: float) -> float:
 
 def analyze_all_periods(costs_data: Dict) -> Dict:
     """Analyze costs across all periods"""
-    analysis = {
-        "periods": {},
-        "anomalies": [],
-        "ai_service_alerts": []
-    }
-    
+    analysis = {"periods": {}, "anomalies": [], "ai_service_alerts": []}
+
     # Analyze each period
     for period_name, period_costs in costs_data.items():
         period_total = 0
         period_by_account = {}
-        
+
         for account_id, services in period_costs.items():
             account_total = sum(services.values())
             period_total += account_total
-            
+
             # Get service breakdown
             services_breakdown = {}
             for service, cost in services.items():
                 if cost >= 0.01:  # Filter out negligible costs
                     services_breakdown[service] = cost
-            
+
             if account_total >= 0.01:  # Only include accounts with costs
                 period_by_account[account_id] = {
                     "total": account_total,
-                    "services": services_breakdown
+                    "services": services_breakdown,
                 }
-        
+
         analysis["periods"][period_name] = {
             "total": period_total,
-            "accounts": period_by_account
+            "accounts": period_by_account,
         }
-    
+
     # Check for anomalies between yesterday and today
     if "yesterday_full" in costs_data and "today_so_far" in costs_data:
         for account_id in costs_data["today_so_far"]:
             today_services = costs_data["today_so_far"].get(account_id, {})
             yesterday_services = costs_data["yesterday_full"].get(account_id, {})
-            
+
             for service, today_cost in today_services.items():
                 yesterday_cost = yesterday_services.get(service, 0)
-                
+
                 # Pro-rate yesterday's cost based on current time of day
                 now = datetime.now(pytz.timezone(USER_TIMEZONE))
                 hours_passed = now.hour + (now.minute / 60)
                 prorated_yesterday = (yesterday_cost / 24) * hours_passed
-                
+
                 if prorated_yesterday > 0:
-                    delta_percent = calculate_percent_change(prorated_yesterday, today_cost)
+                    delta_percent = calculate_percent_change(
+                        prorated_yesterday, today_cost
+                    )
                     delta_amount = today_cost - prorated_yesterday
-                    
+
                     # Check for anomalies
                     is_ai_service = service in AI_SERVICES
                     threshold_percent = (
@@ -363,8 +388,11 @@ def analyze_all_periods(costs_data: Dict) -> Dict:
                         if is_ai_service
                         else ANOMALY_THRESHOLD_DOLLARS
                     )
-                    
-                    if delta_percent > threshold_percent and delta_amount > threshold_dollars:
+
+                    if (
+                        delta_percent > threshold_percent
+                        and delta_amount > threshold_dollars
+                    ):
                         anomaly = {
                             "account_id": account_id,
                             "service": service,
@@ -374,12 +402,12 @@ def analyze_all_periods(costs_data: Dict) -> Dict:
                             "delta_percent": delta_percent,
                             "is_ai_service": is_ai_service,
                         }
-                        
+
                         if is_ai_service:
                             analysis["ai_service_alerts"].append(anomaly)
                         else:
                             analysis["anomalies"].append(anomaly)
-    
+
     return analysis
 
 
@@ -421,9 +449,11 @@ def check_for_immediate_alerts(analysis: Dict) -> List[Dict]:
 def generate_email_subject(analysis: Dict, alerts: List[Dict]) -> str:
     """Generate email subject line"""
     today_total = analysis["periods"]["today_so_far"]["total"]
-    
+
     if alerts:
-        return f"🚨 AWS Cost Alert - Immediate Action Required - ${today_total:.2f} Today"
+        return (
+            f"🚨 AWS Cost Alert - Immediate Action Required - ${today_total:.2f} Today"
+        )
     elif analysis.get("anomalies"):
         return f"⚠️ AWS Cost Report - Anomalies Detected - ${today_total:.2f} Today"
     else:
@@ -439,7 +469,7 @@ def generate_email_body(
     now_user = datetime.now(user_tz)
     time_str = now_user.strftime("%I:%M %p %Z")
     date_str = now_user.strftime("%B %d, %Y")
-    
+
     html = f"""
     <html>
     <head>
@@ -490,7 +520,7 @@ def generate_email_body(
             <h2>Cost Summary</h2>
             <div style="text-align: center;">
     """
-    
+
     # Today so far
     today_total = analysis["periods"]["today_so_far"]["total"]
     hours_passed = now_user.hour + (now_user.minute / 60)
@@ -500,7 +530,7 @@ def generate_email_body(
                     <div class="metric-value">${today_total:.2f}</div>
                 </div>
     """
-    
+
     # Yesterday full
     yesterday_total = analysis["periods"]["yesterday_full"]["total"]
     html += f"""
@@ -509,7 +539,7 @@ def generate_email_body(
                     <div class="metric-value">${yesterday_total:.2f}</div>
                 </div>
     """
-    
+
     # Month to date
     mtd_total = analysis["periods"]["month_to_date"]["total"]
     html += f"""
@@ -518,7 +548,7 @@ def generate_email_body(
                     <div class="metric-value">${mtd_total:.2f}</div>
                 </div>
     """
-    
+
     # Previous month
     prev_month_total = analysis["periods"]["previous_month_full"]["total"]
     prev_month_name = (now_user.replace(day=1) - timedelta(days=1)).strftime("%B")
@@ -535,15 +565,19 @@ def generate_email_body(
     if analysis["anomalies"] or analysis["ai_service_alerts"]:
         html += "<h2>⚠️ Detected Anomalies</h2>"
         html += "<p>Based on today's usage compared to yesterday's average:</p>"
-        
+
         all_anomalies = analysis["anomalies"] + analysis["ai_service_alerts"]
         for anomaly in sorted(all_anomalies, key=lambda x: x["delta"], reverse=True):
-            severity = "alert" if anomaly["is_ai_service"] and anomaly["delta"] > 100 else "warning"
+            severity = (
+                "alert"
+                if anomaly["is_ai_service"] and anomaly["delta"] > 100
+                else "warning"
+            )
             html += f"""
                 <div class="{severity}">
                     <strong>{anomaly['service']}</strong> in account {anomaly['account_id']}<br>
-                    Current: ${anomaly['today_cost']:.2f} | 
-                    Expected: ${anomaly['expected_cost']:.2f} | 
+                    Current: ${anomaly['today_cost']:.2f} |
+                    Expected: ${anomaly['expected_cost']:.2f} |
                     Increase: ${anomaly['delta']:.2f} ({anomaly['delta_percent']:.1f}%)
                 </div>
             """
@@ -551,20 +585,20 @@ def generate_email_body(
     # Add detailed breakdown for today
     html += '<div class="period-section">'
     html += f"<h2>Today's Costs by Account (as of {time_str})</h2>"
-    
+
     for account_id, account_data in sorted(
-        analysis["periods"]["today_so_far"]["accounts"].items(), 
-        key=lambda x: x[1]["total"], 
-        reverse=True
+        analysis["periods"]["today_so_far"]["accounts"].items(),
+        key=lambda x: x[1]["total"],
+        reverse=True,
     ):
         if account_data["total"] < 0.01:
             continue
-            
+
         html += f"""
         <h3>Account: {account_id}</h3>
         <p>Total: ${account_data['total']:.2f}</p>
         """
-        
+
         if account_data["services"]:
             html += """
             <table>
@@ -573,11 +607,9 @@ def generate_email_body(
                     <th>Cost</th>
                 </tr>
             """
-            
+
             for service, cost in sorted(
-                account_data["services"].items(),
-                key=lambda x: x[1],
-                reverse=True
+                account_data["services"].items(), key=lambda x: x[1], reverse=True
             ):
                 row_class = "ai-service" if service in AI_SERVICES else ""
                 html += f"""
@@ -586,9 +618,9 @@ def generate_email_body(
                     <td>${cost:.2f}</td>
                 </tr>
                 """
-            
+
             html += "</table>"
-    
+
     html += "</div>"
 
     # Add footer
