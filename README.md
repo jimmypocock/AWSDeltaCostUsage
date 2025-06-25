@@ -2,6 +2,8 @@
 
 A timezone-aware AWS cost monitoring solution that sends detailed reports 4 times daily and alerts on anomalies to prevent surprise bills. Perfect for catching runaway costs from expensive services like AWS Comprehend, Bedrock, and other AI services before they impact your budget.
 
+> **💰 Running Cost**: This tool costs approximately **$5/month** to operate (see [cost breakdown](#-monthly-running-cost-5) below)
+
 ## 🌟 Key Features
 
 This serverless solution automatically monitors your AWS costs across all accounts in your AWS Organization and:
@@ -63,6 +65,16 @@ The system **automatically handles DST transitions**:
 - When clocks "spring forward", your 7 AM report stays at 7 AM
 - When clocks "fall back", your 7 AM report stays at 7 AM
 - No manual adjustments needed - ever!
+
+## 💰 Monthly Running Cost: ~$5
+
+**Important**: This tool costs approximately **$5/month** to run, primarily from AWS Cost Explorer API charges:
+
+- **Cost Explorer API**: $4.80/month ($0.01 per API call × 480 calls)
+- **Other AWS services**: ~$0.50/month (Lambda, SES, CloudWatch Logs)
+- **Total**: ~$5.30/month
+
+*Note: There is NO free tier for the Cost Explorer API. Each API call costs $0.01 from the first request.*
 
 ## 🚀 Quick Start
 
@@ -322,17 +334,24 @@ aws logs filter-log-events \
   --filter-pattern "ERROR"
 ```
 
-## 💰 Running Costs
+## 💰 Detailed Cost Breakdown
 
-Extremely minimal:
+As mentioned at the top, this tool costs approximately **$5/month** to run:
 
-- **Lambda**: ~$0.50/month (120 invocations × 1 minute × 512MB)
-- **SES**: $0.10 per 1,000 emails  
-- **Cost Explorer API**: ~$0.16/day ($5/month) - 4 API calls per invocation × 4 times daily = 16 calls/day @ $0.01/call
-- **EventBridge**: Free tier
-- **Total**: ~$5-6/month
+### Cost Explorer API (90% of total cost)
+- **No free tier** - $0.01 per API request from the first call
+- 4 API calls per Lambda execution (one for each time period)
+- 4 executions daily × 30 days = 480 API calls/month
+- 480 × $0.01 = **$4.80/month**
 
-**Cost Optimization Note**: We use DAILY granularity for all queries to minimize Cost Explorer API costs. Using HOURLY granularity would be significantly more expensive and wouldn't provide much additional value for anomaly detection.
+### Other AWS Services
+- **Lambda**: ~$0.03/month (well within free tier)
+- **SES**: ~$0.02/month (under free tier for most users)
+- **CloudWatch Logs**: ~$0.01/month (minimal logging)
+- **EventBridge**: FREE (no charges for scheduled rules)
+
+### Cost Optimization
+We use DAILY granularity for all queries to keep costs at ~$5/month. Using HOURLY granularity would increase costs to $30+ per month due to the increased number of API calls required.
 
 ## 🗑️ Uninstall
 
