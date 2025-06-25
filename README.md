@@ -3,6 +3,8 @@
 A timezone-aware AWS cost monitoring solution that sends detailed reports 4 times daily and alerts on anomalies to prevent surprise bills. Perfect for catching runaway costs from expensive services like AWS Comprehend, Bedrock, and other AI services before they impact your budget.
 
 > **💰 Running Cost**: This tool costs approximately **$5/month** to operate (see [cost breakdown](#-monthly-running-cost-5) below)
+> 
+> **💡 Pro Tip**: Keep this in a public GitHub repository to get free GitHub Actions CI/CD - no additional costs!
 
 ## 🌟 Key Features
 
@@ -16,6 +18,8 @@ This serverless solution automatically monitors your AWS costs across all accoun
 - 💰 **Cost Prevention**: Catch issues early before they impact your budget
 
 ## 📊 What You'll See in Reports
+
+![AWS Cost Monitor Email Report Example](public/images/example.png)
 
 Each email report includes four key metrics displayed prominently:
 
