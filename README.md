@@ -2,7 +2,7 @@
 
 A timezone-aware AWS cost monitoring solution that sends detailed reports 4 times daily and alerts on anomalies to prevent surprise bills. Perfect for catching runaway costs from expensive services like AWS Comprehend, Bedrock, and other AI services before they impact your budget.
 
-> **💰 Running Cost**: This tool costs approximately **$5/month** to operate (see [cost breakdown](#-monthly-running-cost-5) below)
+> **💰 Running Cost**: This tool costs approximately **$1.20/month** to operate (see [cost breakdown](#-monthly-running-cost-120) below)
 > 
 > **💡 Pro Tip**: Keep this in a public GitHub repository to get free GitHub Actions CI/CD - no additional costs!
 
@@ -70,13 +70,13 @@ The system **automatically handles DST transitions**:
 - When clocks "fall back", your 7 AM report stays at 7 AM
 - No manual adjustments needed - ever!
 
-## 💰 Monthly Running Cost: ~$5
+## 💰 Monthly Running Cost: ~$1.20
 
-**Important**: This tool costs approximately **$5/month** to run, primarily from AWS Cost Explorer API charges:
+**Important**: This tool costs approximately **$1.20/month** to run, primarily from AWS Cost Explorer API charges:
 
-- **Cost Explorer API**: $4.80/month ($0.01 per API call × 480 calls)
-- **Other AWS services**: ~$0.50/month (Lambda, SES, CloudWatch Logs)
-- **Total**: ~$5.30/month
+- **Cost Explorer API**: $1.20/month ($0.01 per API call × 120 calls)
+- **Other AWS services**: ~$0.10/month (Lambda, SES, CloudWatch Logs)
+- **Total**: ~$1.30/month
 
 *Note: There is NO free tier for the Cost Explorer API. Each API call costs $0.01 from the first request.*
 
@@ -340,22 +340,22 @@ aws logs filter-log-events \
 
 ## 💰 Detailed Cost Breakdown
 
-As mentioned at the top, this tool costs approximately **$5/month** to run:
+As mentioned at the top, this tool costs approximately **$1.20/month** to run:
 
 ### Cost Explorer API (90% of total cost)
 - **No free tier** - $0.01 per API request from the first call
-- 4 API calls per Lambda execution (one for each time period)
-- 4 executions daily × 30 days = 480 API calls/month
-- 480 × $0.01 = **$4.80/month**
+- 1 API call per Lambda execution (fetches all time periods in one request)
+- 4 executions daily × 30 days = 120 API calls/month
+- 120 × $0.01 = **$1.20/month**
 
 ### Other AWS Services
 - **Lambda**: ~$0.03/month (well within free tier)
 - **SES**: ~$0.02/month (under free tier for most users)
-- **CloudWatch Logs**: ~$0.01/month (minimal logging)
+- **CloudWatch Logs**: ~$0.05/month (minimal logging)
 - **EventBridge**: FREE (no charges for scheduled rules)
 
 ### Cost Optimization
-We use DAILY granularity for all queries to keep costs at ~$5/month. Using HOURLY granularity would increase costs to $30+ per month due to the increased number of API calls required.
+We use DAILY granularity for all queries to keep costs at ~$1.20/month. Using HOURLY granularity would increase costs to $30+ per month due to the increased number of API calls required.
 
 ## 🗑️ Uninstall
 

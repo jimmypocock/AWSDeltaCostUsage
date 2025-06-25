@@ -72,7 +72,7 @@ This AWS Lambda function monitors AWS costs across all accounts in an AWS Organi
   - Sends HTML-formatted email reports via SES
   - Special handling for expensive AI services (Comprehend, Bedrock, etc.)
   - Shows costs in user's local timezone
-  - Cost optimization: Uses DAILY granularity to minimize API costs (~$5/month vs $30+/month for hourly)
+  - Cost optimization: Uses DAILY granularity to minimize API costs (~$1.20/month vs $30+/month for hourly)
 
 - **template.yaml**: SAM template defining:
   - Lambda function with 5-minute timeout
