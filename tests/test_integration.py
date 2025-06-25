@@ -210,6 +210,7 @@ class TestLambdaIntegration:
 
             # Reload the module to apply mocks
             import importlib
+
             import lambda_function
 
             importlib.reload(lambda_function)
@@ -303,6 +304,7 @@ class TestLambdaIntegration:
                 mock_boto_client.side_effect = client_factory
 
                 import importlib
+
                 import lambda_function
 
                 importlib.reload(lambda_function)
@@ -389,6 +391,7 @@ class TestLambdaIntegration:
                     mock_boto_client.side_effect = client_factory
 
                     import importlib
+
                     import lambda_function
 
                     importlib.reload(lambda_function)
@@ -475,6 +478,7 @@ class TestLambdaIntegration:
                 mock_boto_client.side_effect = client_factory
 
                 import importlib
+
                 import lambda_function
 
                 importlib.reload(lambda_function)

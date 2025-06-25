@@ -2,9 +2,9 @@ import json
 import os
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple
-import pytz
 
 import boto3
+import pytz
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
