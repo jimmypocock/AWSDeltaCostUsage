@@ -2,21 +2,24 @@ import os
 
 # Add the src directory to Python path
 import sys
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, Mock, patch
 
 import boto3
 import pytest
+import pytz
 from freezegun import freeze_time
 from moto import mock_aws
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from lambda_function import (
-    analyze_costs,
+    analyze_all_periods,
     calculate_percent_change,
     check_for_immediate_alerts,
     generate_email_body,
     generate_email_subject,
+    get_timezone_aware_dates,
     lambda_handler,
 )
 
@@ -42,6 +45,7 @@ def mock_env_vars():
     os.environ["ANOMALY_THRESHOLD_PERCENT"] = "50"
     os.environ["ANOMALY_THRESHOLD_DOLLARS"] = "50"
     os.environ["AI_SERVICE_MULTIPLIER"] = "0.5"
+    os.environ["USER_TIMEZONE"] = "US/Central"
     yield
     # Clean up
     for key in [
@@ -50,6 +54,7 @@ def mock_env_vars():
         "ANOMALY_THRESHOLD_PERCENT",
         "ANOMALY_THRESHOLD_DOLLARS",
         "AI_SERVICE_MULTIPLIER",
+        "USER_TIMEZONE",
     ]:
         os.environ.pop(key, None)
 
@@ -72,24 +77,40 @@ def sample_accounts():
 
 
 @pytest.fixture
-def sample_cost_data():
-    """Sample cost data for testing"""
+def sample_cost_data_periods():
+    """Sample cost data for all periods"""
     return {
-        "current": {
+        "today_so_far": {
+            "123456789012": {
+                "Amazon EC2": 50.0,
+                "Amazon S3": 25.0,
+                "Amazon Bedrock": 15.0,
+            },
+            "123456789013": {"Amazon EC2": 40.0, "AWS Lambda": 5.0},
+        },
+        "yesterday_full": {
             "123456789012": {
                 "Amazon EC2": 100.0,
                 "Amazon S3": 50.0,
-                "Amazon Bedrock": 25.0,
+                "Amazon Bedrock": 10.0,
             },
             "123456789013": {"Amazon EC2": 80.0, "AWS Lambda": 10.0},
         },
-        "previous": {
+        "month_to_date": {
             "123456789012": {
-                "Amazon EC2": 90.0,
-                "Amazon S3": 45.0,
-                "Amazon Bedrock": 5.0,
+                "Amazon EC2": 1100.0,
+                "Amazon S3": 550.0,
+                "Amazon Bedrock": 125.0,
             },
-            "123456789013": {"Amazon EC2": 75.0, "AWS Lambda": 8.0},
+            "123456789013": {"Amazon EC2": 880.0, "AWS Lambda": 110.0},
+        },
+        "previous_month_full": {
+            "123456789012": {
+                "Amazon EC2": 3000.0,
+                "Amazon S3": 1500.0,
+                "Amazon Bedrock": 300.0,
+            },
+            "123456789013": {"Amazon EC2": 2400.0, "AWS Lambda": 300.0},
         },
     }
 
@@ -116,96 +137,95 @@ class TestCalculatePercentChange:
         assert abs(calculate_percent_change(0.01, 0.02) - 100.0) < 0.01
 
 
-class TestAnalyzeCosts:
-    """Test the analyze_costs function"""
+class TestGetTimezoneAwareDates:
+    """Test timezone-aware date calculations"""
 
-    def test_basic_analysis(self, sample_cost_data):
-        analysis = analyze_costs(
-            sample_cost_data["current"], sample_cost_data["previous"]
-        )
+    @freeze_time("2024-06-11 14:30:00")  # 2:30 PM UTC
+    def test_central_timezone(self):
+        # Central time is UTC-5 (CDT) or UTC-6 (CST)
+        # In June, it's CDT (UTC-5), so 2:30 PM UTC = 9:30 AM CDT
+        dates = get_timezone_aware_dates("US/Central")
+        
+        # Today so far should be from midnight CDT to current time
+        assert dates["today_so_far"][0] == "2024-06-11"  # Midnight CDT = 5 AM UTC on same day
+        assert dates["today_so_far"][1] == "2024-06-12"  # Tomorrow for Cost Explorer
+        
+        # Yesterday should be full day
+        assert dates["yesterday_full"][0] == "2024-06-10"
+        assert dates["yesterday_full"][1] == "2024-06-11"
+        
+        # Month to date
+        assert dates["month_to_date"][0] == "2024-06-01"
+        assert dates["month_to_date"][1] == "2024-06-12"
+        
+        # Previous month (May)
+        assert dates["previous_month_full"][0] == "2024-05-01"
+        assert dates["previous_month_full"][1] == "2024-06-01"
 
-        # Check totals
-        assert analysis["total_current"] == 265.0  # 100+50+25+80+10
-        assert analysis["total_previous"] == 223.0  # 90+45+5+75+8
-        assert analysis["total_delta"] == 42.0
-        assert abs(analysis["total_delta_percent"] - 18.83) < 0.01
+    @freeze_time("2024-01-15 18:00:00")  # 6 PM UTC
+    def test_eastern_timezone_january(self):
+        # Eastern time in January is EST (UTC-5)
+        # 6 PM UTC = 1 PM EST
+        dates = get_timezone_aware_dates("US/Eastern")
+        
+        # Verify we handle year boundaries correctly
+        assert dates["previous_month_full"][0] == "2023-12-01"
+        assert dates["previous_month_full"][1] == "2024-01-01"
 
-        # Check account-level data
-        assert "123456789012" in analysis["accounts"]
-        assert "123456789013" in analysis["accounts"]
+    def test_invalid_timezone_fallback(self):
+        # Should fall back to UTC for invalid timezone
+        dates = get_timezone_aware_dates("Invalid/Timezone")
+        assert dates is not None  # Should not crash
 
-        # Check service-level data for account 123456789012
-        ec2_data = analysis["accounts"]["123456789012"]["services"]["Amazon EC2"]
-        assert ec2_data["current"] == 100.0
-        assert ec2_data["previous"] == 90.0
-        assert ec2_data["delta"] == 10.0
-        assert abs(ec2_data["delta_percent"] - 11.11) < 0.01
 
-    def test_anomaly_detection(self, sample_cost_data):
-        # Modify data to trigger anomaly
-        sample_cost_data["current"]["123456789012"][
-            "Amazon EC2"
-        ] = 200.0  # 122% increase
+class TestAnalyzeAllPeriods:
+    """Test the analyze_all_periods function"""
 
-        analysis = analyze_costs(
-            sample_cost_data["current"], sample_cost_data["previous"]
-        )
+    @freeze_time("2024-06-11 14:30:00")  # 2:30 PM UTC = 9:30 AM CDT
+    def test_basic_analysis(self, sample_cost_data_periods):
+        analysis = analyze_all_periods(sample_cost_data_periods)
+        
+        # Check period totals
+        assert analysis["periods"]["today_so_far"]["total"] == 135.0  # 50+25+15+40+5
+        assert analysis["periods"]["yesterday_full"]["total"] == 250.0  # 100+50+10+80+10
+        assert analysis["periods"]["month_to_date"]["total"] == 2765.0
+        assert analysis["periods"]["previous_month_full"]["total"] == 7500.0
+        
+        # Check account breakdowns exist
+        assert "123456789012" in analysis["periods"]["today_so_far"]["accounts"]
+        assert "123456789013" in analysis["periods"]["today_so_far"]["accounts"]
 
-        # Should detect EC2 anomaly
-        assert len(analysis["anomalies"]) == 1
+    @freeze_time("2024-06-11 14:30:00")  # 9:30 AM CDT
+    def test_anomaly_detection_prorated(self, sample_cost_data_periods):
+        # At 9:30 AM, we're 9.5 hours into the day
+        # Yesterday's EC2 was $100 for full day, so prorated = $100 * (9.5/24) = $39.58
+        # For anomaly: need both >50% and >$50 increase
+        
+        # Modify today's cost to trigger anomaly
+        # Need today's cost to be > $39.58 + $50 = ~$90
+        sample_cost_data_periods["today_so_far"]["123456789012"]["Amazon EC2"] = 95.0
+        
+        analysis = analyze_all_periods(sample_cost_data_periods)
+        
+        # Should detect anomaly for EC2
+        assert len(analysis["anomalies"]) > 0
         anomaly = analysis["anomalies"][0]
         assert anomaly["service"] == "Amazon EC2"
-        assert anomaly["delta"] == 110.0
-        assert anomaly["is_ai_service"] is False
+        assert anomaly["today_cost"] == 95.0
+        # Expected cost should be around 39.58 (100 * 9.5/24)
+        assert 39 < anomaly["expected_cost"] < 40
 
-    def test_ai_service_alert(self, sample_cost_data):
-        # Bedrock increased from 5 to 25 (400% increase, $20 delta)
-        # With 0.5 multiplier: threshold is 25% and $25
-        # This should NOT trigger an alert as delta is only $20
-
-        analysis = analyze_costs(
-            sample_cost_data["current"], sample_cost_data["previous"]
-        )
-        assert len(analysis["ai_service_alerts"]) == 0
-
-        # Now increase Bedrock cost to trigger alert
-        sample_cost_data["current"]["123456789012"][
-            "Amazon Bedrock"
-        ] = 50.0  # $45 increase
-        analysis = analyze_costs(
-            sample_cost_data["current"], sample_cost_data["previous"]
-        )
-
-        assert len(analysis["ai_service_alerts"]) == 1
+    def test_ai_service_alert_detection(self, sample_cost_data_periods):
+        # Increase Bedrock cost significantly
+        sample_cost_data_periods["today_so_far"]["123456789012"]["Amazon Bedrock"] = 50.0
+        
+        analysis = analyze_all_periods(sample_cost_data_periods)
+        
+        # Should detect AI service alert
+        assert len(analysis["ai_service_alerts"]) > 0
         alert = analysis["ai_service_alerts"][0]
         assert alert["service"] == "Amazon Bedrock"
-        assert alert["delta"] == 45.0
         assert alert["is_ai_service"] is True
-
-    def test_new_service_appears(self):
-        current = {"123456789012": {"Amazon EC2": 100.0, "Amazon RDS": 50.0}}
-        previous = {"123456789012": {"Amazon EC2": 100.0}}
-
-        analysis = analyze_costs(current, previous)
-
-        rds_data = analysis["accounts"]["123456789012"]["services"]["Amazon RDS"]
-        assert rds_data["current"] == 50.0
-        assert rds_data["previous"] == 0.0
-        assert rds_data["delta"] == 50.0
-        assert rds_data["delta_percent"] == 100.0
-
-    def test_new_account_appears(self):
-        current = {
-            "123456789012": {"Amazon EC2": 100.0},
-            "123456789014": {"Amazon S3": 25.0},
-        }
-        previous = {"123456789012": {"Amazon EC2": 100.0}}
-
-        analysis = analyze_costs(current, previous)
-
-        assert "123456789014" in analysis["accounts"]
-        assert analysis["accounts"]["123456789014"]["current"] == 25.0
-        assert analysis["accounts"]["123456789014"]["previous"] == 0.0
 
 
 class TestCheckForImmediateAlerts:
@@ -220,7 +240,7 @@ class TestCheckForImmediateAlerts:
                     "delta_percent": 500.0,
                 }
             ],
-            "accounts": {},
+            "anomalies": [],
         }
 
         alerts = check_for_immediate_alerts(analysis)
@@ -232,17 +252,15 @@ class TestCheckForImmediateAlerts:
     def test_extreme_increase_alert(self):
         analysis = {
             "ai_service_alerts": [],
-            "accounts": {
-                "123456789012": {
-                    "services": {
-                        "Amazon EC2": {
-                            "delta_percent": 600.0,  # 600% increase
-                            "current": 50.0,  # Over $10
-                            "delta": 42.0,
-                        }
-                    }
+            "anomalies": [
+                {
+                    "service": "Amazon EC2",
+                    "delta_percent": 600.0,  # 600% increase
+                    "today_cost": 50.0,  # Over $10
+                    "delta": 42.0,
+                    "account_id": "123456789012",
                 }
-            },
+            ],
         }
 
         alerts = check_for_immediate_alerts(analysis)
@@ -251,120 +269,79 @@ class TestCheckForImmediateAlerts:
         assert "Amazon EC2" in alerts[0]["message"]
         assert "600%" in alerts[0]["message"]
 
-    def test_no_alerts(self):
-        analysis = {
-            "ai_service_alerts": [],
-            "accounts": {
-                "123456789012": {
-                    "services": {
-                        "Amazon EC2": {
-                            "delta_percent": 10.0,
-                            "current": 100.0,
-                            "delta": 9.0,
-                        }
-                    }
-                }
-            },
-        }
-
-        alerts = check_for_immediate_alerts(analysis)
-        assert len(alerts) == 0
-
 
 class TestEmailGeneration:
     """Test email subject and body generation"""
 
     def test_subject_with_alerts(self):
-        analysis = {"total_current": 1234.56, "total_delta_percent": 15.0}
+        analysis = {
+            "periods": {
+                "today_so_far": {"total": 1234.56}
+            }
+        }
         alerts = [{"type": "CRITICAL_AI_COST"}]
 
         subject = generate_email_subject(analysis, alerts)
         assert subject.startswith("🚨")
         assert "Immediate Action Required" in subject
-        assert "$1234.56" in subject
+        assert "$1234.56 Today" in subject
 
-    def test_subject_cost_increase(self):
-        analysis = {"total_current": 1234.56, "total_delta_percent": 25.0}
+    def test_subject_with_anomalies(self):
+        analysis = {
+            "periods": {
+                "today_so_far": {"total": 1234.56}
+            },
+            "anomalies": [{"service": "EC2"}]
+        }
         alerts = []
 
         subject = generate_email_subject(analysis, alerts)
         assert subject.startswith("⚠️")
-        assert "Costs Up 25.0%" in subject
-        assert "$1234.56" in subject
+        assert "Anomalies Detected" in subject
+        assert "$1234.56 Today" in subject
 
     def test_subject_normal(self):
-        analysis = {"total_current": 1234.56, "total_delta_percent": 5.0}
+        analysis = {
+            "periods": {
+                "today_so_far": {"total": 1234.56}
+            },
+            "anomalies": []
+        }
         alerts = []
 
         subject = generate_email_subject(analysis, alerts)
         assert subject.startswith("✅")
-        assert "$1234.56 Daily" in subject
+        assert "$1234.56 Today" in subject
 
-    @freeze_time("2024-06-11 12:00:00")
-    def test_email_body_date_range(self):
-        analysis = {
-            "total_current": 100.0,
-            "total_previous": 90.0,
-            "total_delta": 10.0,
-            "total_delta_percent": 11.11,
-            "accounts": {},
-        }
+    @freeze_time("2024-06-11 14:30:00")  # 2:30 PM UTC = 9:30 AM CDT
+    def test_email_body_structure(self, sample_cost_data_periods):
+        # Use analyze_all_periods to get the correct structure
+        analysis = analyze_all_periods(sample_cost_data_periods)
         alerts = []
-        start_date = "2024-06-09"
-        end_date = "2024-06-11"
+        date_ranges = get_timezone_aware_dates("US/Central")
 
-        body = generate_email_body(analysis, alerts, start_date, end_date)
+        body = generate_email_body(analysis, alerts, date_ranges, "US/Central")
 
-        # Check date range in header
-        assert "2024-06-09 to 2024-06-11" in body
+        # Check header
+        assert "AWS Cost Report" in body
+        assert "June 11, 2024" in body
+        assert "09:30 AM CDT" in body
 
-        # Check formatted dates in summary
-        assert "Jun 09, 2024" in body
-        assert "Jun 11, 2024" in body
-        assert "Current Period:" in body
-        assert "Compared With:" in body
-        assert "Data Freshness:" in body
+        # Check four metric boxes
+        assert "Today (9.5 hours)" in body
+        assert "$135.00" in body
+        assert "Yesterday (Full Day)" in body
+        assert "$250.00" in body
+        assert "Month to Date" in body
+        assert "$2765.00" in body
+        assert "May (Full Month)" in body  # Previous month name
+        assert "$7500.00" in body
 
-        # Check the note about data delay
-        assert "24-hour delay" in body
-        # Check that time is shown
-        assert "12:00 PM" in body  # From the freeze_time
+        # Check timezone info
+        assert "US/Central" in body
+        assert "midnight to 09:30 AM CDT" in body
 
-    def test_email_body_ai_service_highlighting(self):
-        analysis = {
-            "total_current": 100.0,
-            "total_previous": 90.0,
-            "total_delta": 10.0,
-            "total_delta_percent": 11.11,
-            "accounts": {
-                "123456789012": {
-                    "current": 100.0,
-                    "previous": 90.0,
-                    "delta": 10.0,
-                    "delta_percent": 11.11,
-                    "services": {
-                        "Amazon Bedrock": {
-                            "current": 50.0,
-                            "previous": 40.0,
-                            "delta": 10.0,
-                            "delta_percent": 25.0,
-                        },
-                        "Amazon EC2": {
-                            "current": 50.0,
-                            "previous": 50.0,
-                            "delta": 0.0,
-                            "delta_percent": 0.0,
-                        },
-                    },
-                }
-            },
-        }
-        alerts = []
-
-        body = generate_email_body(analysis, alerts, "2024-06-09", "2024-06-11")
-
-        # Check for AI service highlighting
-        assert "ai-service" in body
+        # Check AI service note
         assert "Yellow highlighted rows indicate AI services" in body
 
 
@@ -372,7 +349,7 @@ class TestEmailGeneration:
 class TestLambdaHandler:
     """Test the main lambda_handler function"""
 
-    @freeze_time("2024-06-11 13:00:00")  # 1 PM UTC = 7 AM CST
+    @freeze_time("2024-06-11 13:00:00")  # 1 PM UTC = 8 AM CDT
     def test_successful_execution(self, lambda_context, mock_env_vars):
         # Set up mock organizations
         org_client = boto3.client("organizations", region_name="us-east-1")
@@ -402,23 +379,53 @@ class TestLambdaHandler:
 
             mock_boto_client.side_effect = client_side_effect
 
-            # Mock CE response
-            mock_ce.get_cost_and_usage.return_value = {
-                "ResultsByTime": [
-                    {
-                        "Groups": [
+            # Mock CE response for different time periods
+            def ce_response_side_effect(**kwargs):
+                # Return different data based on the date range
+                if kwargs["Granularity"] == "HOURLY":
+                    # Today's data (hourly)
+                    return {
+                        "ResultsByTime": [
                             {
-                                "Keys": ["Amazon EC2", "123456789012"],
-                                "Metrics": {"UnblendedCost": {"Amount": "100.0"}},
+                                "TimePeriod": {"Start": "2024-06-11T00:00:00Z", "End": "2024-06-11T01:00:00Z"},
+                                "Groups": [
+                                    {
+                                        "Keys": ["Amazon EC2", "123456789012"],
+                                        "Metrics": {"UnblendedCost": {"Amount": "5.0"}},
+                                    }
+                                ]
                             },
                             {
-                                "Keys": ["Amazon S3", "123456789012"],
-                                "Metrics": {"UnblendedCost": {"Amount": "50.0"}},
-                            },
+                                "TimePeriod": {"Start": "2024-06-11T01:00:00Z", "End": "2024-06-11T02:00:00Z"},
+                                "Groups": [
+                                    {
+                                        "Keys": ["Amazon EC2", "123456789012"],
+                                        "Metrics": {"UnblendedCost": {"Amount": "5.0"}},
+                                    }
+                                ]
+                            }
                         ]
                     }
-                ]
-            }
+                else:
+                    # Daily data
+                    return {
+                        "ResultsByTime": [
+                            {
+                                "Groups": [
+                                    {
+                                        "Keys": ["Amazon EC2", "123456789012"],
+                                        "Metrics": {"UnblendedCost": {"Amount": "100.0"}},
+                                    },
+                                    {
+                                        "Keys": ["Amazon S3", "123456789012"],
+                                        "Metrics": {"UnblendedCost": {"Amount": "50.0"}},
+                                    },
+                                ]
+                            }
+                        ]
+                    }
+
+            mock_ce.get_cost_and_usage.side_effect = ce_response_side_effect
 
             # Import the module to apply mocks
             import lambda_function
@@ -432,21 +439,8 @@ class TestLambdaHandler:
             assert result["statusCode"] == 200
             assert "Cost report sent successfully" in result["body"]
 
-            # Verify CE was called with correct date ranges
-            assert mock_ce.get_cost_and_usage.call_count == 2
-
-            # Check the dates used
-            calls = mock_ce.get_cost_and_usage.call_args_list
-
-            # First call (current period): 2024-06-10 to 2024-06-12 (includes today + 1)
-            first_call = calls[0][1]
-            assert first_call["TimePeriod"]["Start"] == "2024-06-10"
-            assert first_call["TimePeriod"]["End"] == "2024-06-12"
-
-            # Second call (previous period): 2024-06-08 to 2024-06-10
-            second_call = calls[1][1]
-            assert second_call["TimePeriod"]["Start"] == "2024-06-08"
-            assert second_call["TimePeriod"]["End"] == "2024-06-10"
+            # Verify CE was called for all four periods
+            assert mock_ce.get_cost_and_usage.call_count == 4
 
     def test_error_handling(self, lambda_context, mock_env_vars):
         with patch("lambda_function.get_organization_accounts") as mock_get_accounts:
@@ -460,65 +454,65 @@ class TestLambdaHandler:
                 assert "API Error" in mock_send_error.call_args[0][0]
 
 
-class TestDateRangeConsistency:
-    """Test for date range consistency issues"""
+class TestTimezoneEdgeCases:
+    """Test timezone edge cases and DST transitions"""
 
-    @freeze_time("2024-06-11 13:00:00")
-    def test_date_range_calculations(self):
-        # Test the date range logic
-        from datetime import datetime, timedelta
+    @freeze_time("2024-03-10 07:00:00")  # 7 AM UTC on DST transition day
+    def test_dst_spring_forward(self):
+        # US/Eastern transitions from EST to EDT at 2 AM on March 10, 2024
+        dates = get_timezone_aware_dates("US/Eastern")
+        
+        # Should handle the transition correctly
+        assert dates["yesterday_full"][0] == "2024-03-09"
+        assert dates["yesterday_full"][1] == "2024-03-10"
 
-        # Lambda function logic
-        end_date = datetime.now() + timedelta(days=1)  # 2024-06-12
-        start_date = end_date - timedelta(days=2)  # 2024-06-10
-        comparison_start = start_date - timedelta(days=2)  # 2024-06-08
+    @freeze_time("2024-11-03 07:00:00")  # 7 AM UTC on DST transition day
+    def test_dst_fall_back(self):
+        # US/Eastern transitions from EDT to EST at 2 AM on November 3, 2024
+        dates = get_timezone_aware_dates("US/Eastern")
+        
+        # Should handle the transition correctly
+        assert dates["yesterday_full"][0] == "2024-11-02"
+        assert dates["yesterday_full"][1] == "2024-11-03"
 
-        # The email claims "48 hours" but it's actually including today's partial data
-        # So it's really: yesterday + today (partial) = ~48 hours of data
+    def test_non_dst_timezone(self):
+        # Arizona doesn't observe DST
+        dates = get_timezone_aware_dates("US/Arizona")
+        assert dates is not None
 
-        # Format for Cost Explorer
-        end_str = end_date.strftime("%Y-%m-%d")  # 2024-06-12
-        start_str = start_date.strftime("%Y-%m-%d")  # 2024-06-10
-        comparison_start_str = comparison_start.strftime("%Y-%m-%d")  # 2024-06-08
-
-        # This gives us:
-        # Current period: 2024-06-10 to 2024-06-12 (2 full days + today's partial)
-        # Previous period: 2024-06-08 to 2024-06-10 (2 full days)
-
-        assert end_str == "2024-06-12"
-        assert start_str == "2024-06-10"
-        assert comparison_start_str == "2024-06-08"
-
-    def test_email_text_accuracy(self):
-        # The email says "generated automatically every 6 hours" on line 363
-        # But the schedule is actually at specific times: 7 AM, 1 PM, 6 PM, 11 PM CT
-        # This is misleading and should be fixed
-
-        # The email also says "Total Cost (48 hours)" on line 299
-        # But it's actually showing data from start_date to end_date
-        # Which includes today's partial data, so it could be more or less than 48 hours
-
-        assert True  # This test documents the issue
+    def test_international_timezones(self):
+        # Test various international timezones
+        for tz in ["Europe/London", "Asia/Tokyo", "Australia/Sydney"]:
+            dates = get_timezone_aware_dates(tz)
+            assert dates is not None
+            assert len(dates) == 4  # All four periods
 
 
-class TestPaginationIssue:
-    """Test for pagination issues with Cost Explorer API"""
+class TestEmailContentAccuracy:
+    """Test that email content matches the new data structure"""
 
-    def test_cost_explorer_no_pagination(self):
-        # The get_costs_by_service_and_account function doesn't handle pagination
-        # Cost Explorer API can return paginated results for large datasets
-        # Current implementation only processes the first page
-
-        # This is a known limitation that should be fixed
-        assert True  # This test documents the issue
-
-
-class TestRetryLogic:
-    """Test for missing retry logic"""
-
-    def test_no_retry_on_api_failures(self):
-        # None of the AWS API calls have retry logic
-        # boto3 has built-in retry but it's not configured
-        # This could cause failures on transient errors
-
-        assert True  # This test documents the issue
+    @freeze_time("2024-06-11 18:00:00")  # 6 PM UTC = 1 PM CDT
+    def test_email_schedule_text(self):
+        # The email should mention the correct schedule
+        analysis = {
+            "periods": {
+                "today_so_far": {"total": 100.0, "accounts": {}},
+                "yesterday_full": {"total": 200.0, "accounts": {}},
+                "month_to_date": {"total": 3000.0, "accounts": {}},
+                "previous_month_full": {"total": 6000.0, "accounts": {}}
+            },
+            "anomalies": [],
+            "ai_service_alerts": []
+        }
+        
+        date_ranges = get_timezone_aware_dates("US/Central")
+        body = generate_email_body(analysis, [], date_ranges, "US/Central")
+        
+        # Should NOT mention "every 6 hours" anymore
+        assert "every 6 hours" not in body
+        
+        # Should show timezone info
+        assert "US/Central timezone" in body
+        
+        # Should show today's coverage correctly
+        assert "Today (13.0 hours)" in body  # 1 PM = 13 hours

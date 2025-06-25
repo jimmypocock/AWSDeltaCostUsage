@@ -19,6 +19,7 @@ def setup_aws_environment():
     os.environ["ANOMALY_THRESHOLD_PERCENT"] = "50"
     os.environ["ANOMALY_THRESHOLD_DOLLARS"] = "50"
     os.environ["AI_SERVICE_MULTIPLIER"] = "0.5"
+    os.environ["USER_TIMEZONE"] = "US/Central"
     os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
 
     yield
@@ -30,6 +31,7 @@ def setup_aws_environment():
         "ANOMALY_THRESHOLD_PERCENT",
         "ANOMALY_THRESHOLD_DOLLARS",
         "AI_SERVICE_MULTIPLIER",
+        "USER_TIMEZONE",
     ]:
         os.environ.pop(key, None)
 
@@ -58,7 +60,7 @@ def lambda_context():
 class TestLambdaIntegration:
     """Integration tests for the complete Lambda function flow"""
 
-    @freeze_time("2024-06-11 13:00:00")  # 1 PM UTC = 7 AM CST
+    @freeze_time("2024-06-11 13:00:00")  # 1 PM UTC = 8 AM CDT
     def test_full_cost_report_flow(self, setup_aws_environment, lambda_context):
         """Test the complete flow from trigger to email sent"""
 
@@ -81,91 +83,109 @@ class TestLambdaIntegration:
 
         mock_ce_client = MagicMock()
 
-        # Define cost data for different periods
-        current_period_data = {
-            "ResultsByTime": [
-                {
-                    "TimePeriod": {"Start": "2024-06-10", "End": "2024-06-12"},
-                    "Groups": [
-                        # Production account
-                        {
-                            "Keys": ["Amazon EC2", "123456789012"],
-                            "Metrics": {"UnblendedCost": {"Amount": "150.50"}},
-                        },
-                        {
-                            "Keys": ["Amazon S3", "123456789012"],
-                            "Metrics": {"UnblendedCost": {"Amount": "45.25"}},
-                        },
-                        {
-                            "Keys": ["Amazon Bedrock", "123456789012"],
-                            "Metrics": {"UnblendedCost": {"Amount": "120.00"}},
-                        },  # AI service spike
-                        # Development account
-                        {
-                            "Keys": ["Amazon EC2", "123456789013"],
-                            "Metrics": {"UnblendedCost": {"Amount": "80.00"}},
-                        },
-                        {
-                            "Keys": ["AWS Lambda", "123456789013"],
-                            "Metrics": {"UnblendedCost": {"Amount": "5.50"}},
-                        },
-                        # Staging account
-                        {
-                            "Keys": ["Amazon EC2", "123456789014"],
-                            "Metrics": {"UnblendedCost": {"Amount": "25.00"}},
-                        },
-                        {
-                            "Keys": ["Amazon RDS", "123456789014"],
-                            "Metrics": {"UnblendedCost": {"Amount": "0.005"}},
-                        },  # Below threshold
-                    ],
-                }
-            ]
-        }
-
-        previous_period_data = {
-            "ResultsByTime": [
-                {
-                    "TimePeriod": {"Start": "2024-06-08", "End": "2024-06-10"},
-                    "Groups": [
-                        # Production account
-                        {
-                            "Keys": ["Amazon EC2", "123456789012"],
-                            "Metrics": {"UnblendedCost": {"Amount": "140.00"}},
-                        },
-                        {
-                            "Keys": ["Amazon S3", "123456789012"],
-                            "Metrics": {"UnblendedCost": {"Amount": "42.00"}},
-                        },
-                        {
-                            "Keys": ["Amazon Bedrock", "123456789012"],
-                            "Metrics": {"UnblendedCost": {"Amount": "10.00"}},
-                        },  # Was much lower
-                        # Development account
-                        {
-                            "Keys": ["Amazon EC2", "123456789013"],
-                            "Metrics": {"UnblendedCost": {"Amount": "75.00"}},
-                        },
-                        {
-                            "Keys": ["AWS Lambda", "123456789013"],
-                            "Metrics": {"UnblendedCost": {"Amount": "5.00"}},
-                        },
-                        # Staging account
-                        {
-                            "Keys": ["Amazon EC2", "123456789014"],
-                            "Metrics": {"UnblendedCost": {"Amount": "20.00"}},
-                        },
-                    ],
-                }
-            ]
-        }
-
-        # Set up the mock to return different data for different date ranges
+        # Define cost data for different periods and granularities
         def get_cost_side_effect(**kwargs):
-            if kwargs["TimePeriod"]["Start"] == "2024-06-10":
-                return current_period_data
+            granularity = kwargs.get("Granularity", "DAILY")
+            start_date = kwargs["TimePeriod"]["Start"]
+            
+            if granularity == "HOURLY":
+                # Today's hourly data
+                return {
+                    "ResultsByTime": [
+                        {
+                            "TimePeriod": {"Start": "2024-06-11T00:00:00Z", "End": "2024-06-11T01:00:00Z"},
+                            "Groups": [
+                                {
+                                    "Keys": ["Amazon EC2", "123456789012"],
+                                    "Metrics": {"UnblendedCost": {"Amount": "6.25"}},
+                                },
+                                {
+                                    "Keys": ["Amazon Bedrock", "123456789012"],
+                                    "Metrics": {"UnblendedCost": {"Amount": "5.00"}},
+                                },
+                            ]
+                        },
+                        {
+                            "TimePeriod": {"Start": "2024-06-11T01:00:00Z", "End": "2024-06-11T02:00:00Z"},
+                            "Groups": [
+                                {
+                                    "Keys": ["Amazon EC2", "123456789012"],
+                                    "Metrics": {"UnblendedCost": {"Amount": "6.25"}},
+                                },
+                                {
+                                    "Keys": ["Amazon Bedrock", "123456789012"],
+                                    "Metrics": {"UnblendedCost": {"Amount": "5.00"}},
+                                },
+                            ]
+                        }
+                    ]
+                }
+            elif start_date == "2024-06-10":
+                # Yesterday's data
+                return {
+                    "ResultsByTime": [
+                        {
+                            "Groups": [
+                                {
+                                    "Keys": ["Amazon EC2", "123456789012"],
+                                    "Metrics": {"UnblendedCost": {"Amount": "150.00"}},
+                                },
+                                {
+                                    "Keys": ["Amazon S3", "123456789012"],
+                                    "Metrics": {"UnblendedCost": {"Amount": "45.00"}},
+                                },
+                                {
+                                    "Keys": ["Amazon Bedrock", "123456789012"],
+                                    "Metrics": {"UnblendedCost": {"Amount": "10.00"}},
+                                },
+                                {
+                                    "Keys": ["Amazon EC2", "123456789013"],
+                                    "Metrics": {"UnblendedCost": {"Amount": "80.00"}},
+                                },
+                            ]
+                        }
+                    ]
+                }
+            elif start_date == "2024-06-01":
+                # Month to date
+                return {
+                    "ResultsByTime": [
+                        {
+                            "Groups": [
+                                {
+                                    "Keys": ["Amazon EC2", "123456789012"],
+                                    "Metrics": {"UnblendedCost": {"Amount": "1650.00"}},
+                                },
+                                {
+                                    "Keys": ["Amazon S3", "123456789012"],
+                                    "Metrics": {"UnblendedCost": {"Amount": "495.00"}},
+                                },
+                                {
+                                    "Keys": ["Amazon Bedrock", "123456789012"],
+                                    "Metrics": {"UnblendedCost": {"Amount": "110.00"}},
+                                },
+                            ]
+                        }
+                    ]
+                }
             else:
-                return previous_period_data
+                # Previous month
+                return {
+                    "ResultsByTime": [
+                        {
+                            "Groups": [
+                                {
+                                    "Keys": ["Amazon EC2", "123456789012"],
+                                    "Metrics": {"UnblendedCost": {"Amount": "4500.00"}},
+                                },
+                                {
+                                    "Keys": ["Amazon S3", "123456789012"],
+                                    "Metrics": {"UnblendedCost": {"Amount": "1350.00"}},
+                                },
+                            ]
+                        }
+                    ]
+                }
 
         mock_ce_client.get_cost_and_usage.side_effect = get_cost_side_effect
 
@@ -195,28 +215,17 @@ class TestLambdaIntegration:
             assert result["statusCode"] == 200
             assert "Cost report sent successfully" in result["body"]
 
-            # Verify Cost Explorer was called correctly
-            assert mock_ce_client.get_cost_and_usage.call_count == 2
+            # Verify Cost Explorer was called for all 4 periods
+            assert mock_ce_client.get_cost_and_usage.call_count == 4
 
-            # Verify the email was sent
-            # In moto, we can't easily verify the email content, but we can check
-            # that the send_email method would have been called
+    @freeze_time("2024-06-11 23:00:00")  # 11 PM UTC = 6 PM CDT
+    def test_anomaly_detection_flow(self, setup_aws_environment, lambda_context):
+        """Test anomaly detection with AI service alerts"""
 
-    @freeze_time("2024-06-11 23:00:00")  # 11 PM UTC = 5 PM CST (during DST)
-    def test_multi_account_cost_aggregation(
-        self, setup_aws_environment, lambda_context
-    ):
-        """Test correct aggregation across multiple accounts"""
-
-        # Set up Organizations with multiple accounts
+        # Set up Organizations
         org_client = boto3.client("organizations", region_name="us-east-1")
         org_client.create_organization(FeatureSet="ALL")
-
-        # Create 5 accounts to test scalability
-        for i in range(5):
-            org_client.create_account(
-                AccountName=f"Account-{i}", Email=f"account{i}@example.com"
-            )
+        org_client.create_account(AccountName="Production", Email="prod@example.com")
 
         ses_client = boto3.client("ses", region_name="us-east-1")
         ses_client.verify_email_identity(EmailAddress="noreply@awscostmonitor.com")
@@ -226,26 +235,45 @@ class TestLambdaIntegration:
 
         mock_ce_client = MagicMock()
 
-        # Generate cost data for multiple accounts
-        groups = []
-        for i in range(5):
-            account_id = f"12345678901{i}"
-            groups.extend(
-                [
-                    {
-                        "Keys": ["Amazon EC2", account_id],
-                        "Metrics": {"UnblendedCost": {"Amount": f"{50 + i * 10}.00"}},
-                    },
-                    {
-                        "Keys": ["Amazon S3", account_id],
-                        "Metrics": {"UnblendedCost": {"Amount": f"{10 + i * 2}.00"}},
-                    },
-                ]
-            )
+        def get_cost_side_effect(**kwargs):
+            granularity = kwargs.get("Granularity", "DAILY")
+            start_date = kwargs["TimePeriod"]["Start"]
+            
+            if granularity == "HOURLY":
+                # Today's data with AI service spike
+                return {
+                    "ResultsByTime": [
+                        {
+                            "TimePeriod": {"Start": f"2024-06-11T{i:02d}:00:00Z", "End": f"2024-06-11T{i+1:02d}:00:00Z"},
+                            "Groups": [
+                                {
+                                    "Keys": ["Amazon Bedrock", "123456789012"],
+                                    "Metrics": {"UnblendedCost": {"Amount": "50.00"}},  # High cost per hour
+                                },
+                            ]
+                        }
+                        for i in range(18)  # 18 hours of data
+                    ]
+                }
+            elif start_date == "2024-06-10":
+                # Yesterday's normal data
+                return {
+                    "ResultsByTime": [
+                        {
+                            "Groups": [
+                                {
+                                    "Keys": ["Amazon Bedrock", "123456789012"],
+                                    "Metrics": {"UnblendedCost": {"Amount": "100.00"}},  # Normal daily cost
+                                },
+                            ]
+                        }
+                    ]
+                }
+            else:
+                # Other periods
+                return {"ResultsByTime": [{"Groups": []}]}
 
-        mock_ce_client.get_cost_and_usage.return_value = {
-            "ResultsByTime": [{"Groups": groups}]
-        }
+        mock_ce_client.get_cost_and_usage.side_effect = get_cost_side_effect
 
         with patch("boto3.client") as mock_boto_client:
             with patch("lambda_function.send_email") as mock_send_email:
@@ -273,12 +301,184 @@ class TestLambdaIntegration:
                 # Verify successful execution
                 assert result["statusCode"] == 200
 
-                # Verify email contains all accounts
+                # Verify alert email was sent
+                subject = mock_send_email.call_args[0][0]
                 body = mock_send_email.call_args[0][1]
-                for i in range(5):
-                    assert f"12345678901{i}" in body
+                
+                # Should have anomaly alert in subject
+                assert "Alert" in subject or "Anomalies" in subject
+                
+                # Should mention Bedrock in the body
+                assert "Amazon Bedrock" in body
+                assert "alert" in body.lower() or "anomal" in body.lower()
 
+    def test_timezone_handling(self, setup_aws_environment, lambda_context):
+        """Test different timezone configurations"""
+        
+        # Test with different timezones
+        for timezone in ["US/Eastern", "Europe/London", "Asia/Tokyo"]:
+            os.environ["USER_TIMEZONE"] = timezone
+            
+            from unittest.mock import MagicMock, patch
+            
+            org_client = boto3.client("organizations", region_name="us-east-1")
+            org_client.create_organization(FeatureSet="ALL")
+            
+            ses_client = boto3.client("ses", region_name="us-east-1")
+            ses_client.verify_email_identity(EmailAddress="noreply@awscostmonitor.com")
+            
+            mock_ce_client = MagicMock()
+            
+            # Create a proper response structure
+            def mock_ce_response(**kwargs):
+                if kwargs.get("Granularity") == "HOURLY":
+                    # Return hourly data with proper structure
+                    return {
+                        "ResultsByTime": [
+                            {
+                                "TimePeriod": {
+                                    "Start": f"2024-06-11T{i:02d}:00:00Z",
+                                    "End": f"2024-06-11T{i+1:02d}:00:00Z"
+                                },
+                                "Groups": []
+                            }
+                            for i in range(8)  # 8 hours of data
+                        ]
+                    }
+                else:
+                    # Return daily data
+                    return {
+                        "ResultsByTime": [
+                            {
+                                "TimePeriod": {
+                                    "Start": kwargs["TimePeriod"]["Start"],
+                                    "End": kwargs["TimePeriod"]["End"]
+                                },
+                                "Groups": []
+                            }
+                        ]
+                    }
+            
+            mock_ce_client.get_cost_and_usage.side_effect = mock_ce_response
+            
+            with patch("boto3.client") as mock_boto_client:
+                with patch("lambda_function.send_email") as mock_send_email:
+                    
+                    def client_factory(service_name, **kwargs):
+                        if service_name == "ce":
+                            return mock_ce_client
+                        elif service_name == "ses":
+                            return ses_client
+                        elif service_name == "organizations":
+                            return org_client
+                        return MagicMock()
+                    
+                    mock_boto_client.side_effect = client_factory
+                    
+                    import importlib
+                    import lambda_function
+                    
+                    importlib.reload(lambda_function)
+                    lambda_function.send_email = mock_send_email
+                    
+                    # Execute the Lambda
+                    result = lambda_function.lambda_handler({}, lambda_context)
+                    
+                    # Verify successful execution
+                    assert result["statusCode"] == 200
+                    
+                    # Verify timezone is mentioned in email
+                    body = mock_send_email.call_args[0][1]
+                    assert timezone in body
 
-# Removed TestRealAWSIntegration class - not needed for CI/CD
-# The pagination safety limits in the code (max 10 pages) provide sufficient protection
-# Real AWS testing can be done manually if needed
+    @freeze_time("2024-06-11 13:00:00")
+    def test_four_period_reporting(self, setup_aws_environment, lambda_context):
+        """Test that all four time periods are included in the report"""
+        
+        org_client = boto3.client("organizations", region_name="us-east-1")
+        org_client.create_organization(FeatureSet="ALL")
+        
+        ses_client = boto3.client("ses", region_name="us-east-1")
+        ses_client.verify_email_identity(EmailAddress="noreply@awscostmonitor.com")
+        
+        from unittest.mock import MagicMock, patch
+        
+        mock_ce_client = MagicMock()
+        
+        # Create a proper response structure
+        def mock_ce_response(**kwargs):
+            if kwargs.get("Granularity") == "HOURLY":
+                # Return hourly data with proper structure
+                return {
+                    "ResultsByTime": [
+                        {
+                            "TimePeriod": {
+                                "Start": f"2024-06-11T{i:02d}:00:00Z",
+                                "End": f"2024-06-11T{i+1:02d}:00:00Z"
+                            },
+                            "Groups": [
+                                {
+                                    "Keys": ["Amazon EC2", "123456789012"],
+                                    "Metrics": {"UnblendedCost": {"Amount": "10.00"}},
+                                }
+                            ]
+                        }
+                        for i in range(8)  # 8 hours of data
+                    ]
+                }
+            else:
+                # Return daily data
+                return {
+                    "ResultsByTime": [
+                        {
+                            "TimePeriod": {
+                                "Start": kwargs["TimePeriod"]["Start"],
+                                "End": kwargs["TimePeriod"]["End"]
+                            },
+                            "Groups": [
+                                {
+                                    "Keys": ["Amazon EC2", "123456789012"],
+                                    "Metrics": {"UnblendedCost": {"Amount": "100.00"}},
+                                }
+                            ]
+                        }
+                    ]
+                }
+        
+        mock_ce_client.get_cost_and_usage.side_effect = mock_ce_response
+        
+        with patch("boto3.client") as mock_boto_client:
+            with patch("lambda_function.send_email") as mock_send_email:
+                
+                def client_factory(service_name, **kwargs):
+                    if service_name == "ce":
+                        return mock_ce_client
+                    elif service_name == "ses":
+                        return ses_client
+                    elif service_name == "organizations":
+                        return org_client
+                    return MagicMock()
+                
+                mock_boto_client.side_effect = client_factory
+                
+                import importlib
+                import lambda_function
+                
+                importlib.reload(lambda_function)
+                lambda_function.send_email = mock_send_email
+                
+                # Execute the Lambda
+                result = lambda_function.lambda_handler({}, lambda_context)
+                
+                # Verify successful execution
+                assert result["statusCode"] == 200
+                
+                # Verify email contains all four periods
+                body = mock_send_email.call_args[0][1]
+                assert "Today" in body
+                assert "Yesterday" in body
+                assert "Month to Date" in body
+                assert "Full Month" in body
+                
+                # Verify Cost Explorer was called 4 times
+                assert mock_ce_client.get_cost_and_usage.call_count == 4

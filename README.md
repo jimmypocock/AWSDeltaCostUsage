@@ -1,38 +1,70 @@
 # AWS Cost Monitor
 
-Automated AWS cost monitoring solution that sends detailed reports every 6 hours and alerts on anomalies to prevent surprise bills. Perfect for catching runaway costs from expensive services like AWS Comprehend, Bedrock, and other AI services before they impact your budget.
+A timezone-aware AWS cost monitoring solution that sends detailed reports 4 times daily and alerts on anomalies to prevent surprise bills. Perfect for catching runaway costs from expensive services like AWS Comprehend, Bedrock, and other AI services before they impact your budget.
 
-## What This Does
+## 🌟 Key Features
 
 This serverless solution automatically monitors your AWS costs across all accounts in your AWS Organization and:
-- 📊 Sends detailed cost reports every 6 hours via email
-- 🚨 Alerts immediately when costs spike unexpectedly
-- 🎯 Provides extra-sensitive monitoring for expensive AI services
-- 📈 Shows cost trends with visual indicators (red for increases, green for decreases)
-- 💰 Helps prevent surprise bills by catching issues early
 
-## Features
+- 📊 **Smart Reporting**: Sends reports at 7 AM, 1 PM, 6 PM, and 11 PM in YOUR timezone
+- 🌍 **Global Timezone Support**: Works anywhere in the world with automatic DST handling
+- 📈 **Four Time Periods**: Today so far, Yesterday full, Month-to-date, Previous month full
+- 🚨 **Intelligent Alerts**: Immediate notifications when costs spike unexpectedly
+- 🎯 **AI Service Focus**: Extra-sensitive monitoring for expensive AI services
+- 💰 **Cost Prevention**: Catch issues early before they impact your budget
 
-### 🎯 Smart Anomaly Detection
+## 📊 What You'll See in Reports
 
-- **AI Service Monitoring**: Extra-sensitive monitoring for expensive services like Comprehend, Bedrock, Textract
-- **Percentage & Dollar Thresholds**: Alerts when costs increase by both percentage AND dollar amount
-- **Immediate Alerts**: Critical alerts for runaway costs (like your Lambda/Comprehend incident)
+Each email report includes four key metrics displayed prominently:
 
-### 📊 Comprehensive Reporting
+1. **Today So Far** - Costs from midnight to the current time (e.g., "Today (13.5 hours): $45.23")
+2. **Yesterday Full** - Complete 24-hour costs from the previous day
+3. **Month to Date** - Running total from the 1st to now
+4. **Previous Month** - Last month's complete total for comparison
 
-- **Multi-Account Support**: Monitors all accounts in your AWS Organization
-- **Service-Level Breakdown**: See costs by service within each account
-- **Delta Analysis**: Shows cost changes from previous period
-- **Visual Formatting**: Color-coded HTML emails for easy scanning
+All times and calculations respect your configured timezone, including DST transitions.
 
-### ⏰ Automated Scheduling
+## 🌍 Timezone Configuration
 
-- Runs every 6 hours automatically
-- Configurable schedule via EventBridge
-- Manual trigger support for testing
+The system supports **all global timezones** with automatic Daylight Saving Time handling:
 
-## Quick Start
+### Popular Timezone Examples
+
+```bash
+# United States
+USER_TIMEZONE=US/Eastern      # New York, Miami, Atlanta
+USER_TIMEZONE=US/Central      # Chicago, Dallas, Houston (default)
+USER_TIMEZONE=US/Mountain     # Denver, Phoenix
+USER_TIMEZONE=US/Pacific      # Los Angeles, Seattle, San Francisco
+
+# Europe
+USER_TIMEZONE=Europe/London   # UK
+USER_TIMEZONE=Europe/Paris    # France, Germany (CET)
+USER_TIMEZONE=Europe/Moscow   # Russia
+
+# Asia-Pacific
+USER_TIMEZONE=Asia/Tokyo      # Japan
+USER_TIMEZONE=Asia/Shanghai   # China
+USER_TIMEZONE=Asia/Singapore  # Singapore
+USER_TIMEZONE=Australia/Sydney # Australia (AEDT/AEST)
+
+# Americas
+USER_TIMEZONE=America/Toronto    # Canada Eastern
+USER_TIMEZONE=America/Sao_Paulo  # Brazil
+USER_TIMEZONE=America/Mexico_City # Mexico
+```
+
+[Full timezone list](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones)
+
+### DST Handling
+
+The system **automatically handles DST transitions**:
+
+- When clocks "spring forward", your 7 AM report stays at 7 AM
+- When clocks "fall back", your 7 AM report stays at 7 AM
+- No manual adjustments needed - ever!
+
+## 🚀 Quick Start
 
 ### Prerequisites
 
@@ -40,171 +72,246 @@ This serverless solution automatically monitors your AWS costs across all accoun
 - SAM CLI installed (`brew install aws-sam-cli`)
 - AWS Organizations set up (or single account)
 - Access to deploy Lambda functions and create IAM roles
-- Python 3.12 or compatible version
+- Python 3.12 runtime support
 
-### Configuration Setup
-
-1. **Copy the example configuration file:**
-
-   ```bash
-   cp .env.example .env
-   ```
-
-2. **Edit `.env` and set your email addresses:**
-
-   ```bash
-   # Required configuration
-   EMAIL_TO=your-email@example.com
-   EMAIL_FROM=noreply@your-domain.com
-
-   # Optional: AWS profile
-   AWS_PROFILE=your-profile-name
-
-   # Optional: Customize thresholds
-   ANOMALY_THRESHOLD_PERCENT=50
-   ANOMALY_THRESHOLD_DOLLARS=50
-   ```
-
-### Deploy in 2 Minutes
+### 1. Configuration Setup
 
 ```bash
-# Run the deployment script (reads from .env automatically)
+# Clone the repository (if using as template)
+git clone https://github.com/yourusername/aws-cost-monitor.git
+cd aws-cost-monitor
+
+# Copy the example configuration
+cp .env.example .env
+
+# Edit .env with your settings
+nano .env  # or vim, code, etc.
+```
+
+Example `.env` configuration:
+
+```bash
+# Required: Email Configuration
+EMAIL_TO=john.doe@company.com,jane.smith@company.com
+EMAIL_FROM=aws-costs@company.com
+
+# Required: Set your local timezone
+USER_TIMEZONE=US/Eastern  # Change to your timezone!
+
+# Optional: AWS Configuration
+AWS_PROFILE=production    # If using named profiles
+AWS_REGION=us-east-1     # Defaults to us-east-1
+
+# Optional: Alert Thresholds
+ANOMALY_THRESHOLD_PERCENT=50  # 50% increase triggers alert
+ANOMALY_THRESHOLD_DOLLARS=50  # AND $50 increase
+AI_SERVICE_MULTIPLIER=0.5     # AI services: 25% and $25
+```
+
+### 2. Deploy in 2 Minutes
+
+```bash
+# Quick deployment using .env file
 ./deploy.sh
 
-# Or use command line flags
-./deploy.sh --email-to your@email.com --email-from sender@domain.com
+# With specific AWS profile
+./deploy.sh --profile production
 
-# Or use environment variables
-export EMAIL_TO=your@email.com
-export EMAIL_FROM=sender@domain.com
-./deploy.sh
+# Override configuration via command line
+./deploy.sh --email-to alerts@company.com --timezone US/Pacific
 
 # See all options
 ./deploy.sh --help
 ```
 
-### Manual Deployment
+### 3. Post-Deployment Setup
+
+**IMPORTANT**: Verify email addresses in SES before the Lambda can send emails:
+
+1. Go to [SES Verified Identities](https://console.aws.amazon.com/ses/home#/verified-identities)
+2. Click "Create identity" → Choose "Email address"
+3. Add both EMAIL_TO and EMAIL_FROM addresses
+4. Check email and click verification links
+5. For production, consider moving out of SES sandbox
+
+### 4. Test Your Setup
+
+```bash
+# Manually trigger the Lambda
+aws lambda invoke --function-name aws-cost-monitor /tmp/test.json
+cat /tmp/test.json
+
+# Check logs
+aws logs tail /aws/lambda/aws-cost-monitor --follow
+
+# With profile
+aws --profile production lambda invoke --function-name aws-cost-monitor /tmp/test.json
+```
+
+## 📧 Email Report Structure
+
+### Report Header
+
+Shows the current date and time in your configured timezone:
+
+```
+AWS Cost Report
+December 15, 2024 at 1:00 PM EST
+```
+
+### Cost Summary Section
+
+Four metric boxes displaying:
+
+- **Today (X.X hours)**: $XXX.XX
+- **Yesterday (Full Day)**: $XXX.XX
+- **Month to Date**: $X,XXX.XX
+- **November (Full Month)**: $X,XXX.XX
+
+### Anomaly Alerts
+
+When detected, shows:
+
+- 🚨 Critical alerts for AI service spikes over $100
+- ⚠️ Warnings for services exceeding thresholds
+- Comparison between today's prorated costs vs yesterday
+
+### Detailed Breakdown
+
+- Account-by-account costs for today
+- Service-level details within each account
+- AI services highlighted in yellow
+- Costs under $0.01 are filtered out
+
+## 🎯 Anomaly Detection Logic
+
+The system uses intelligent anomaly detection:
+
+1. **Prorated Comparison**: At 1 PM, compares today's costs against 13/24ths of yesterday
+2. **Dual Thresholds**: Both percentage AND dollar thresholds must be exceeded
+3. **AI Service Sensitivity**: AI services use 0.5x multiplier (more sensitive)
+
+Example scenarios:
+
+- Normal service: Needs >50% AND >$50 increase to alert
+- AI service: Needs >25% AND >$25 increase to alert
+- Critical: Any AI service increase >$100 triggers immediate alert
+
+## 🔧 Advanced Configuration
+
+### Manual SAM Deployment
 
 ```bash
 # Build the application
 sam build
 
-# Deploy with guided prompts
-sam deploy --guided
-
-# Or deploy with parameters from environment
+# Deploy with parameters
 sam deploy \
   --stack-name aws-cost-monitor \
   --capabilities CAPABILITY_IAM \
   --parameter-overrides \
-    EmailTo=$EMAIL_TO \
-    EmailFrom=$EMAIL_FROM
+    EmailTo=alerts@company.com \
+    EmailFrom=noreply@company.com \
+    UserTimezone=Europe/London \
+    AnomalyThresholdPercent=40 \
+    AnomalyThresholdDollars=30
 ```
 
-## Post-Deployment Setup
+### Environment Variables
 
-### 1. Verify Email Addresses in SES
+All settings can be configured via environment variables:
 
-**IMPORTANT**: You must verify email addresses before the Lambda can send emails.
+| Variable                    | Required | Default    | Description                            |
+| --------------------------- | -------- | ---------- | -------------------------------------- |
+| `EMAIL_TO`                  | Yes      | -          | Recipient emails (comma-separated)     |
+| `EMAIL_FROM`                | Yes      | -          | Sender email (must be SES verified)    |
+| `USER_TIMEZONE`             | No       | US/Central | Your local timezone                    |
+| `AWS_PROFILE`               | No       | default    | AWS CLI profile to use                 |
+| `ANOMALY_THRESHOLD_PERCENT` | No       | 50         | Percentage increase threshold          |
+| `ANOMALY_THRESHOLD_DOLLARS` | No       | 50         | Dollar amount increase threshold       |
+| `AI_SERVICE_MULTIPLIER`     | No       | 0.5        | Sensitivity multiplier for AI services |
 
-1. Go to [SES Verified Identities](https://console.aws.amazon.com/ses/home#/verified-identities)
-2. Click "Create identity"
-3. Choose "Email address"
-4. Enter the email addresses from your `.env` file (both EMAIL_TO and EMAIL_FROM)
-5. Check your email and click the verification link
-6. Repeat for the sender email if using a custom address
+### Customizing Schedule Times
 
-### 2. Test the Function
+The default schedule (7 AM, 1 PM, 6 PM, 11 PM) is defined in `template.yaml`. To change:
 
-```bash
-# Invoke the function manually
-aws lambda invoke \
-  --function-name aws-cost-monitor \
-  /tmp/test-output.json
+1. Note your timezone's UTC offset
+2. Calculate the UTC hours for your desired local times
+3. Update the cron expression:
 
-# Check the output
-cat /tmp/test-output.json
+```yaml
+# Current: 7 AM, 1 PM, 6 PM, 11 PM Central Time
+Schedule: cron(0 13,19,0,5 * * ? *)
 
-# View logs
-aws logs tail /aws/lambda/aws-cost-monitor --follow
+# Example: 9 AM and 5 PM Eastern Time (UTC-5)
+# 9 AM EST = 2 PM UTC, 5 PM EST = 10 PM UTC
+Schedule: cron(0 14,22 * * ? *)
+
+# Example: Every 6 hours starting at midnight local time
+# Calculate midnight in UTC for your timezone
+Schedule: rate(6 hours)
 ```
 
-## Configuration
+## 🛡️ Security & Cost Safety
 
-### Configuration Methods
+### Security Features
 
-The deployment script supports three ways to configure settings:
+- Minimal IAM permissions (least privilege)
+- Email verification through SES
+- No hardcoded credentials
+- All data stays in your AWS account
+- `.env` files gitignored by default
 
-1. **`.env` file** (Recommended)
+### Cost Protection
 
-   - Copy `.env.example` to `.env`
-   - Update with your values
-   - Automatically loaded by deploy script
+- **Conservative retry logic**: Max 2 attempts per API call
+- **Pagination limits**: Max 10 pages per query
+- **Lambda timeout**: 5-minute hard limit
+- **API call limit**: Only 16 Cost Explorer calls per day
+- **Free tier friendly**: Well under the 1M free API calls/month
 
-2. **Environment Variables**
+### Monitored AI Services
 
-   ```bash
-   export EMAIL_TO=your@email.com
-   export EMAIL_FROM=sender@domain.com
-   export AWS_PROFILE=your-profile
-   ```
+Special attention with lower thresholds:
 
-3. **Command Line Flags**
-   ```bash
-   ./deploy.sh --email-to your@email.com --email-from sender@domain.com
-   ```
+- Amazon Bedrock
+- Amazon Comprehend
+- Amazon Textract
+- Amazon Rekognition
+- Amazon Transcribe
+- Amazon Translate
+- Amazon Polly
+- Amazon SageMaker
 
-### Available Settings
+## 🔍 Troubleshooting
 
-| Variable                    | Required | Default           | Description                            |
-| --------------------------- | -------- | ----------------- | -------------------------------------- |
-| `EMAIL_TO`                  | Yes      | -                 | Recipients (comma-separated)           |
-| `EMAIL_FROM`                | Yes      | -                 | Sender address (must be verified)      |
-| `AWS_PROFILE`               | No       | default           | AWS CLI profile to use                 |
-| `STACK_NAME`                | No       | AWSDeltaCostUsage | CloudFormation stack name              |
-| `ANOMALY_THRESHOLD_PERCENT` | No       | 50                | Percentage increase to trigger alert   |
-| `ANOMALY_THRESHOLD_DOLLARS` | No       | 50                | Dollar increase to trigger alert       |
-| `AI_SERVICE_MULTIPLIER`     | No       | 0.5               | Sensitivity multiplier for AI services |
+### No Emails Received
 
-### Adjusting Alert Sensitivity
+1. Check SES verified identities
+2. Verify Lambda execution in CloudWatch Logs
+3. Ensure SES isn't in sandbox mode (production)
+4. Check spam/junk folders
 
-For your use case with occasional $14 domain purchases but concern about AI service spikes:
+### Incorrect Times in Reports
 
-- **Normal services**: 50% and $50 thresholds work well
-- **AI services**: 25% and $25 thresholds (using 0.5 multiplier)
-- **Critical alerts**: Any AI service increase over $100
+1. Verify `USER_TIMEZONE` is set correctly
+2. Check timezone spelling (case-sensitive)
+3. Remember: times shown are YOUR local time, not UTC
 
-## Email Report Contents
+### Missing Cost Data
 
-### Example Email Report
+- Cost Explorer can have up to 24-hour delay
+- Some services report costs delayed
+- Ensure Lambda has proper permissions
+- Check AWS Organizations access
 
-![AWS Cost Monitor Email Example](public/images/example.png)
-
-### Regular Report (Every 6 Hours)
-
-- **Report Period**: Shows last 48 hours of costs (including today's partial data)
-- **Total Costs**: Organization-wide spending across all accounts
-- **Account Breakdown**: Individual account costs with percentages
-- **Service Details**: Drilling down to service-level costs per account
-- **Delta Analysis**: Percentage and dollar amount changes from previous period
-- **Visual Indicators**: Color-coded for quick scanning (red = increase, green = decrease)
-- **AI Service Highlighting**: Special yellow background for expensive AI services
-
-### Alert Scenarios
-
-1. **🚨 Critical AI Cost**: When AI services spike over $100
-2. **⚠️ Extreme Increase**: When any service increases by 500%+
-3. **⚠️ Cost Warning**: When total costs increase by 20%+
-
-## Monitoring & Troubleshooting
-
-### Check Function Logs
+### View Logs
 
 ```bash
-# Recent logs
+# Recent executions
 aws logs tail /aws/lambda/aws-cost-monitor
 
-# Live tail
+# Live monitoring
 aws logs tail /aws/lambda/aws-cost-monitor --follow
 
 # Search for errors
@@ -213,115 +320,44 @@ aws logs filter-log-events \
   --filter-pattern "ERROR"
 ```
 
-### Common Issues
-
-1. **No emails received**
-
-   - Check SES verified identities
-   - Review Lambda logs for SES errors
-   - Ensure Lambda has SES permissions
-
-2. **Cost data missing or outdated**
-
-   - Cost Explorer can have up to 24-hour delay
-   - The Lambda now fetches 48 hours of data including today's partial data
-   - Ensure Lambda has ce:\* permissions
-   - Check organization access
-   - Note: AWS Console may show different time periods than the Lambda
-
-3. **Function timeout**
-   - Large organizations may need increased timeout
-   - Current setting: 5 minutes
-
-## Cost of Running This Solution
+## 💰 Running Costs
 
 Extremely minimal:
 
-- **Lambda**: ~$0.50/month (4 executions/day × 30 days)
+- **Lambda**: ~$0.50/month (120 invocations × 1 minute × 512MB)
 - **SES**: $0.10 per 1,000 emails
-- **EventBridge**: Free tier covers this usage
+- **Cost Explorer API**: Free (under 1M requests/month)
+- **EventBridge**: Free tier
 - **Total**: Less than $1/month
 
-## Customization
+## 🗑️ Uninstall
 
-### Adding New AI Services to Monitor
-
-Edit `src/lambda_function.py` and add to the `AI_SERVICES` list:
-
-```python
-AI_SERVICES = [
-    'Amazon Comprehend',
-    'Amazon Bedrock',
-    'Your New Service',
-    # ...
-]
-```
-
-### Changing Report Frequency
-
-Update the EventBridge schedule in `template.yaml`:
-
-```yaml
-Schedule: rate(6 hours) # Change to: rate(1 hour), cron(0 */4 * * ? *), etc.
-```
-
-### Custom Alert Logic
-
-Modify the `check_for_immediate_alerts()` function in `src/lambda_function.py` to add custom alert conditions.
-
-## Removing the Solution
-
-To completely remove all resources:
+To remove all resources:
 
 ```bash
-# Delete the CloudFormation stack
+# Delete the stack
 aws cloudformation delete-stack --stack-name AWSDeltaCostUsage
 
-# Or with profile
-aws --profile your-profile cloudformation delete-stack --stack-name AWSDeltaCostUsage
+# With profile
+aws --profile production cloudformation delete-stack --stack-name AWSDeltaCostUsage
 
-# Remove local files if needed
-# rm -rf src/ events/ template.yaml deploy.sh samconfig.toml
+# Clean up local files (optional)
+rm -rf .aws-sam/ .env samconfig.toml
 ```
 
-## Security Notes
+## 🤝 Contributing
 
-- Lambda runs with minimal required permissions
-- Email addresses are verified through SES
-- No credentials are stored in code
-- All data stays within your AWS account
-- `.env` files are excluded from git via `.gitignore`
-- Never commit sensitive configuration to the repository
+Contributions are welcome! This project is designed to be a template for others to use and customize.
 
-## Support
+1. Fork the repository
+2. Create your feature branch
+3. Test your changes thoroughly
+4. Submit a Pull Request
 
-## Monitored Services
-
-The solution monitors all AWS services with special attention to:
-
-### AI Services (Extra Sensitive Monitoring)
-- 🤖 Amazon Comprehend
-- 🤖 Amazon Bedrock 
-- 🤖 Amazon Textract
-- 🤖 Amazon Rekognition
-- 🤖 Amazon Transcribe
-- 🤖 Amazon Translate
-- 🤖 Amazon Polly
-- 🤖 Amazon SageMaker
-
-### Standard Services
-- ⚡ Lambda
-- 🗄️ DynamoDB
-- 🌐 Amplify
-- 📦 S3
-- 🚀 CloudFront
-- 🌍 Route 53
-- And all other AWS services
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## License
+## 📝 License
 
 This project is open source and available under the MIT License.
+
+---
+
+Made with ❤️ to prevent AWS bill surprises. Remember to set your timezone!

@@ -25,6 +25,11 @@ Parameters:
     Type: Number
     Default: 0.5
     Description: Multiplier for AI service thresholds (lower = more sensitive)
+  
+  UserTimezone:
+    Type: String
+    Default: US/Central
+    Description: Timezone for cost calculations and email reports (e.g., US/Eastern, US/Pacific, Europe/London)
 
 Globals:
   Function:
@@ -46,6 +51,7 @@ Resources:
           ANOMALY_THRESHOLD_PERCENT: !Ref AnomalyThresholdPercent
           ANOMALY_THRESHOLD_DOLLARS: !Ref AnomalyThresholdDollars
           AI_SERVICE_MULTIPLIER: !Ref AIServiceMultiplier
+          USER_TIMEZONE: !Ref UserTimezone
       Events:
         ScheduledEvent:
           Type: Schedule

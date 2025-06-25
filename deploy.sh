@@ -19,6 +19,7 @@ while [[ "$#" -gt 0 ]]; do
         --profile) AWS_PROFILE="$2"; shift ;;
         --email-to) EMAIL_TO="$2"; shift ;;
         --email-from) EMAIL_FROM="$2"; shift ;;
+        --timezone) USER_TIMEZONE="$2"; shift ;;
         --stack-name) STACK_NAME="$2"; shift ;;
         -h|--help)
             echo "Usage: $0 [options]"
@@ -27,6 +28,7 @@ while [[ "$#" -gt 0 ]]; do
             echo "  --profile <profile>      AWS profile to use"
             echo "  --email-to <email>       Email address to receive reports"
             echo "  --email-from <email>     Email address to send reports from"
+            echo "  --timezone <tz>          Timezone for reports (default: US/Central)"
             echo "  --stack-name <name>      CloudFormation stack name (default: AWSDeltaCostUsage)"
             echo "  -h, --help              Show this help message"
             echo ""
@@ -64,6 +66,9 @@ fi
 
 echo "📧 Email To: $EMAIL_TO"
 echo "📧 Email From: $EMAIL_FROM"
+if [ -n "$USER_TIMEZONE" ]; then
+    echo "🕐 Timezone: $USER_TIMEZONE"
+fi
 
 # Set AWS CLI commands with profile if provided
 if [ -n "$AWS_PROFILE" ]; then
@@ -122,6 +127,9 @@ if [ -n "$ANOMALY_THRESHOLD_DOLLARS" ]; then
 fi
 if [ -n "$AI_SERVICE_MULTIPLIER" ]; then
     PARAMETER_OVERRIDES="$PARAMETER_OVERRIDES AIServiceMultiplier=$AI_SERVICE_MULTIPLIER"
+fi
+if [ -n "$USER_TIMEZONE" ]; then
+    PARAMETER_OVERRIDES="$PARAMETER_OVERRIDES UserTimezone=$USER_TIMEZONE"
 fi
 
 # Deploy the SAM application

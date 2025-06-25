@@ -61,11 +61,16 @@ This AWS Lambda function monitors AWS costs across all accounts in an AWS Organi
 
 ### Key Components:
 - **src/lambda_function.py**: Main Lambda handler that:
-  - Fetches costs from Cost Explorer API (48-hour window including today's partial data)
+  - Fetches costs for multiple time periods:
+    - Today so far (midnight to current time)
+    - Yesterday full day (midnight to midnight)
+    - Month-to-date (1st of month to current time)
+    - Previous month full (complete previous month)
+  - Supports user-defined timezones with DST handling
   - Analyzes cost deltas and detects anomalies
   - Sends HTML-formatted email reports via SES
   - Special handling for expensive AI services (Comprehend, Bedrock, etc.)
-  - Shows report period dates in email for clarity
+  - Shows costs in user's local timezone
 
 - **template.yaml**: SAM template defining:
   - Lambda function with 5-minute timeout
@@ -87,10 +92,16 @@ This AWS Lambda function monitors AWS costs across all accounts in an AWS Organi
 - Critical alerts: Immediate notification for $100+ AI service increases
 
 ### Email Report Structure:
-- HTML-formatted with color coding (red=increase, green=decrease)
-- Shows date range being reported (48-hour window)
+- HTML-formatted with clean visual design
+- Four key metrics displayed prominently:
+  - Today so far (with hours passed)
+  - Yesterday full day total
+  - Month-to-date total
+  - Previous month full total
 - Account-level breakdown with service details
 - AI services highlighted with yellow background
+- Anomaly detection comparing today vs yesterday (pro-rated)
+- All times shown in user's configured timezone
 - Filters out negligible costs (<$0.01)
 - Includes note about AWS Cost Explorer potential delays
 
@@ -98,5 +109,13 @@ This AWS Lambda function monitors AWS costs across all accounts in an AWS Organi
 - Reads from .env file (gitignored for security)
 - Supports environment variables
 - Accepts command-line overrides
+- Timezone configuration with DST support (default: US/Central)
 - No hardcoded sensitive information
 - .env.example provided as template
+
+### Timezone Support:
+- Configure via USER_TIMEZONE environment variable
+- Supports all pytz timezones (e.g., US/Eastern, Europe/London, Asia/Tokyo)
+- Automatically handles Daylight Saving Time transitions
+- All cost calculations respect timezone boundaries
+- Email reports show times in configured timezone
