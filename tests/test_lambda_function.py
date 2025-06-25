@@ -1,16 +1,17 @@
 import os
 import sys
-from unittest.mock import MagicMock, Mock, patch
 
-import boto3
-import pytest
-from freezegun import freeze_time
-from moto import mock_aws
-
-# Add the src directory to Python path
+# Add the src directory to Python path before imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from lambda_function import (
+from unittest.mock import MagicMock, Mock, patch  # noqa: E402
+
+import boto3  # noqa: E402
+import pytest  # noqa: E402
+from freezegun import freeze_time  # noqa: E402
+from moto import mock_aws  # noqa: E402
+
+from lambda_function import (  # noqa: E402
     analyze_all_periods,
     calculate_percent_change,
     check_for_immediate_alerts,

@@ -1,14 +1,13 @@
 import os
-
-# Add the src directory to Python path
 import sys
 
-import boto3
-import pytest
-from freezegun import freeze_time
-from moto import mock_aws
-
+# Add the src directory to Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+import boto3  # noqa: E402
+import pytest  # noqa: E402
+from freezegun import freeze_time  # noqa: E402
+from moto import mock_aws  # noqa: E402
 
 
 @pytest.fixture
