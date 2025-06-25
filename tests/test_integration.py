@@ -84,45 +84,24 @@ class TestLambdaIntegration:
 
         # Define cost data for different periods and granularities
         def get_cost_side_effect(**kwargs):
-            granularity = kwargs.get("Granularity", "DAILY")
             start_date = kwargs["TimePeriod"]["Start"]
 
-            if granularity == "HOURLY":
-                # Today's hourly data
+            if start_date == "2024-06-11":
+                # Today's data
                 return {
                     "ResultsByTime": [
                         {
-                            "TimePeriod": {
-                                "Start": "2024-06-11T00:00:00Z",
-                                "End": "2024-06-11T01:00:00Z",
-                            },
                             "Groups": [
                                 {
                                     "Keys": ["Amazon EC2", "123456789012"],
-                                    "Metrics": {"UnblendedCost": {"Amount": "6.25"}},
+                                    "Metrics": {"UnblendedCost": {"Amount": "12.50"}},
                                 },
                                 {
                                     "Keys": ["Amazon Bedrock", "123456789012"],
-                                    "Metrics": {"UnblendedCost": {"Amount": "5.00"}},
+                                    "Metrics": {"UnblendedCost": {"Amount": "10.00"}},
                                 },
                             ],
-                        },
-                        {
-                            "TimePeriod": {
-                                "Start": "2024-06-11T01:00:00Z",
-                                "End": "2024-06-11T02:00:00Z",
-                            },
-                            "Groups": [
-                                {
-                                    "Keys": ["Amazon EC2", "123456789012"],
-                                    "Metrics": {"UnblendedCost": {"Amount": "6.25"}},
-                                },
-                                {
-                                    "Keys": ["Amazon Bedrock", "123456789012"],
-                                    "Metrics": {"UnblendedCost": {"Amount": "5.00"}},
-                                },
-                            ],
-                        },
+                        }
                     ]
                 }
             elif start_date == "2024-06-10":
@@ -242,28 +221,24 @@ class TestLambdaIntegration:
         mock_ce_client = MagicMock()
 
         def get_cost_side_effect(**kwargs):
-            granularity = kwargs.get("Granularity", "DAILY")
             start_date = kwargs["TimePeriod"]["Start"]
 
-            if granularity == "HOURLY":
+            if start_date == "2024-06-11":
                 # Today's data with AI service spike
                 return {
                     "ResultsByTime": [
                         {
-                            "TimePeriod": {
-                                "Start": f"2024-06-11T{i:02d}:00:00Z",
-                                "End": f"2024-06-11T{i+1:02d}:00:00Z",
-                            },
                             "Groups": [
                                 {
                                     "Keys": ["Amazon Bedrock", "123456789012"],
                                     "Metrics": {
-                                        "UnblendedCost": {"Amount": "50.00"}
-                                    },  # High cost per hour
+                                        "UnblendedCost": {
+                                            "Amount": "900.00"
+                                        }  # $900 for today (huge spike)
+                                    },
                                 },
-                            ],
+                            ]
                         }
-                        for i in range(18)  # 18 hours of data
                     ]
                 }
             elif start_date == "2024-06-10":

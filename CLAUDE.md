@@ -61,16 +61,18 @@ This AWS Lambda function monitors AWS costs across all accounts in an AWS Organi
 
 ### Key Components:
 - **src/lambda_function.py**: Main Lambda handler that:
-  - Fetches costs for multiple time periods:
-    - Today so far (midnight to current time)
+  - Fetches costs for multiple time periods (all using DAILY granularity):
+    - Today full day (midnight to midnight) - may be incomplete
     - Yesterday full day (midnight to midnight)
-    - Month-to-date (1st of month to current time)
+    - Month-to-date (1st of month to today)
     - Previous month full (complete previous month)
+  - Uses YYYY-MM-DD date format for all Cost Explorer API calls
   - Supports user-defined timezones with DST handling
-  - Analyzes cost deltas and detects anomalies
+  - Analyzes cost deltas and detects anomalies (comparing full days)
   - Sends HTML-formatted email reports via SES
   - Special handling for expensive AI services (Comprehend, Bedrock, etc.)
   - Shows costs in user's local timezone
+  - Cost optimization: Uses DAILY granularity to minimize API costs (~$5/month vs $30+/month for hourly)
 
 - **template.yaml**: SAM template defining:
   - Lambda function with 5-minute timeout
@@ -87,23 +89,25 @@ This AWS Lambda function monitors AWS costs across all accounts in an AWS Organi
   - Provides post-deployment instructions with correct commands
 
 ### Cost Anomaly Detection Logic:
+- Compares today's full day costs vs yesterday's full day
 - Normal services: Alert when BOTH percentage (50%) AND dollar amount ($50) thresholds exceeded
 - AI services: More sensitive monitoring with 0.5x multiplier (25% and $25)
 - Critical alerts: Immediate notification for $100+ AI service increases
+- Note: Today's data may be incomplete (AWS can delay cost reporting up to 24 hours)
 
 ### Email Report Structure:
 - HTML-formatted with clean visual design
 - Four key metrics displayed prominently:
-  - Today so far (with hours passed)
-  - Yesterday full day total
+  - Today (Full Day) - may be incomplete
+  - Yesterday (Full Day) 
   - Month-to-date total
   - Previous month full total
 - Account-level breakdown with service details
 - AI services highlighted with yellow background
-- Anomaly detection comparing today vs yesterday (pro-rated)
+- Anomaly detection comparing today vs yesterday full days
 - All times shown in user's configured timezone
 - Filters out negligible costs (<$0.01)
-- Includes note about AWS Cost Explorer potential delays
+- Includes note about AWS Cost Explorer potential delays and incomplete today data
 
 ### Configuration System:
 - Reads from .env file (gitignored for security)

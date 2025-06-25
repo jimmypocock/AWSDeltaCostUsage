@@ -118,15 +118,14 @@ def get_timezone_aware_dates(user_tz_str: str) -> Dict[str, Tuple[str, str]]:
     prev_month_start_utc = prev_month_start_user.astimezone(pytz.UTC)
     prev_month_end_utc = prev_month_end_user.astimezone(pytz.UTC)
 
-    # Cost Explorer needs dates in YYYY-MM-DD format
-    # For partial days, we need to fetch the full day and will handle filtering later
+    # Cost Explorer API uses YYYY-MM-DD format for DAILY granularity
+    # For today's partial data, we'll fetch today's full day and note it's incomplete
+
     return {
         "today_so_far": (
             today_start_utc.strftime("%Y-%m-%d"),
-            (now_utc + timedelta(days=1)).strftime(
-                "%Y-%m-%d"
-            ),  # Tomorrow to include today
-            now_user,
+            (today_start_utc + timedelta(days=1)).strftime("%Y-%m-%d"),  # Tomorrow
+            now_user,  # Current time for display purposes
         ),
         "yesterday_full": (
             yesterday_start_utc.strftime("%Y-%m-%d"),
@@ -156,11 +155,13 @@ def lambda_handler(event, context):
         date_ranges = get_timezone_aware_dates(USER_TIMEZONE)
 
         print(f"Fetching costs for timezone: {USER_TIMEZONE}")
-        print(f"Today so far: {date_ranges['today_so_far'][0]} to now")
+        print(f"Today (full day): {date_ranges['today_so_far'][0]}")
         print(
             f"Yesterday: {date_ranges['yesterday_full'][0]} to {date_ranges['yesterday_full'][1]}"
         )
-        print(f"Month to date: {date_ranges['month_to_date'][0]} to now")
+        print(
+            f"Month to date: {date_ranges['month_to_date'][0]} to {date_ranges['month_to_date'][1]}"
+        )
         print(
             f"Previous month: {date_ranges['previous_month_full'][0]} to {date_ranges['previous_month_full'][1]}"
         )
@@ -168,14 +169,12 @@ def lambda_handler(event, context):
         # Get organization accounts
         accounts = get_organization_accounts()
 
-        # Fetch costs for each period
+        # Fetch costs for each period (all using DAILY granularity)
         costs_data = {
             "today_so_far": get_costs_by_service_and_account(
                 date_ranges["today_so_far"][0],
                 date_ranges["today_so_far"][1],
                 accounts,
-                hourly_granularity=True,
-                cutoff_time=date_ranges["today_so_far"][2],
             ),
             "yesterday_full": get_costs_by_service_and_account(
                 date_ranges["yesterday_full"][0],
@@ -186,7 +185,6 @@ def lambda_handler(event, context):
                 date_ranges["month_to_date"][0],
                 date_ranges["month_to_date"][1],
                 accounts,
-                cutoff_time=date_ranges["month_to_date"][2],
             ),
             "previous_month_full": get_costs_by_service_and_account(
                 date_ranges["previous_month_full"][0],
@@ -244,8 +242,6 @@ def get_costs_by_service_and_account(
     start_date: str,
     end_date: str,
     accounts: List[Dict],
-    hourly_granularity: bool = False,
-    cutoff_time: datetime = None,
 ) -> Dict:
     """Get costs broken down by service and account with pagination support"""
     costs = {}
@@ -259,10 +255,10 @@ def get_costs_by_service_and_account(
 
     while page_count < max_pages:
         try:
-            # Build request parameters
+            # Build request parameters (always use DAILY granularity)
             params = {
                 "TimePeriod": {"Start": start_date, "End": end_date},
-                "Granularity": "HOURLY" if hourly_granularity else "DAILY",
+                "Granularity": "DAILY",
                 "Metrics": ["UnblendedCost", "UsageQuantity"],
                 "GroupBy": [
                     {"Type": "DIMENSION", "Key": "SERVICE"},
@@ -279,15 +275,6 @@ def get_costs_by_service_and_account(
 
             # Process results
             for result in response["ResultsByTime"]:
-                # Check if we should include this time period
-                if cutoff_time and hourly_granularity:
-                    result_time = datetime.strptime(
-                        result["TimePeriod"]["Start"], "%Y-%m-%dT%H:%M:%SZ"
-                    )
-                    result_time = result_time.replace(tzinfo=pytz.UTC)
-                    if result_time >= cutoff_time.astimezone(pytz.UTC):
-                        continue  # Skip future hours
-
                 for group in result["Groups"]:
                     service = group["Keys"][0]
                     account_id = group["Keys"][1]
@@ -365,16 +352,11 @@ def analyze_all_periods(costs_data: Dict) -> Dict:
             for service, today_cost in today_services.items():
                 yesterday_cost = yesterday_services.get(service, 0)
 
-                # Pro-rate yesterday's cost based on current time of day
-                now = datetime.now(pytz.timezone(USER_TIMEZONE))
-                hours_passed = now.hour + (now.minute / 60)
-                prorated_yesterday = (yesterday_cost / 24) * hours_passed
-
-                if prorated_yesterday > 0:
-                    delta_percent = calculate_percent_change(
-                        prorated_yesterday, today_cost
-                    )
-                    delta_amount = today_cost - prorated_yesterday
+                # Compare today's full day cost vs yesterday
+                # Note: Today's data may be incomplete if AWS hasn't reported all costs yet
+                if yesterday_cost > 0:
+                    delta_percent = calculate_percent_change(yesterday_cost, today_cost)
+                    delta_amount = today_cost - yesterday_cost
 
                     # Check for anomalies
                     is_ai_service = service in AI_SERVICES
@@ -397,7 +379,7 @@ def analyze_all_periods(costs_data: Dict) -> Dict:
                             "account_id": account_id,
                             "service": service,
                             "today_cost": today_cost,
-                            "expected_cost": prorated_yesterday,
+                            "expected_cost": yesterday_cost,
                             "delta": delta_amount,
                             "delta_percent": delta_percent,
                             "is_ai_service": is_ai_service,
@@ -521,12 +503,11 @@ def generate_email_body(
             <div style="text-align: center;">
     """
 
-    # Today so far
+    # Today (full day - may be incomplete)
     today_total = analysis["periods"]["today_so_far"]["total"]
-    hours_passed = now_user.hour + (now_user.minute / 60)
     html += f"""
                 <div class="metric-box">
-                    <div class="metric-label">Today ({hours_passed:.1f} hours)</div>
+                    <div class="metric-label">Today (Full Day)</div>
                     <div class="metric-value">${today_total:.2f}</div>
                 </div>
     """
@@ -564,7 +545,7 @@ def generate_email_body(
     # Add anomalies section if any
     if analysis["anomalies"] or analysis["ai_service_alerts"]:
         html += "<h2>⚠️ Detected Anomalies</h2>"
-        html += "<p>Based on today's usage compared to yesterday's average:</p>"
+        html += "<p>Comparing today's costs vs yesterday (note: today's data may be incomplete):</p>"
 
         all_anomalies = analysis["anomalies"] + analysis["ai_service_alerts"]
         for anomaly in sorted(all_anomalies, key=lambda x: x["delta"], reverse=True):
@@ -584,7 +565,7 @@ def generate_email_body(
 
     # Add detailed breakdown for today
     html += '<div class="period-section">'
-    html += f"<h2>Today's Costs by Account (as of {time_str})</h2>"
+    html += "<h2>Today's Costs by Account</h2>"
 
     for account_id, account_data in sorted(
         analysis["periods"]["today_so_far"]["accounts"].items(),
@@ -627,9 +608,10 @@ def generate_email_body(
     html += f"""
         <div class="footer">
             <p>This report shows costs in {timezone} timezone.</p>
-            <p>Today's costs cover midnight to {time_str}.</p>
+            <p>Today's costs show the full day (midnight to midnight).</p>
+            <p>Data may be incomplete as AWS can take up to 24 hours to report all costs.</p>
             <p>Yellow highlighted rows indicate AI services with enhanced monitoring.</p>
-            <p>Note: AWS Cost Explorer may have up to 24-hour delay in reporting some costs.</p>
+            <p>Anomaly detection compares today vs yesterday's full day costs.</p>
         </div>
     </body>
     </html>

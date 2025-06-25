@@ -17,12 +17,12 @@ This serverless solution automatically monitors your AWS costs across all accoun
 
 Each email report includes four key metrics displayed prominently:
 
-1. **Today So Far** - Costs from midnight to the current time (e.g., "Today (13.5 hours): $45.23")
-2. **Yesterday Full** - Complete 24-hour costs from the previous day
+1. **Today (Full Day)** - Today's costs from midnight to midnight (may be incomplete)
+2. **Yesterday (Full Day)** - Complete 24-hour costs from the previous day
 3. **Month to Date** - Running total from the 1st to now
 4. **Previous Month** - Last month's complete total for comparison
 
-All times and calculations respect your configured timezone, including DST transitions.
+**Important Note about "Today" costs**: Due to AWS Cost Explorer API limitations and cost considerations, we fetch full day data rather than hourly breakdowns. This means "Today" shows the entire day's costs, which may be incomplete if AWS hasn't reported all costs yet (can take up to 24 hours).
 
 ## 🌍 Timezone Configuration
 
@@ -187,7 +187,7 @@ When detected, shows:
 
 The system uses intelligent anomaly detection:
 
-1. **Prorated Comparison**: At 1 PM, compares today's costs against 13/24ths of yesterday
+1. **Daily Comparison**: Compares today's full day costs vs yesterday's full day
 2. **Dual Thresholds**: Both percentage AND dollar thresholds must be exceeded
 3. **AI Service Sensitivity**: AI services use 0.5x multiplier (more sensitive)
 
@@ -196,6 +196,8 @@ Example scenarios:
 - Normal service: Needs >50% AND >$50 increase to alert
 - AI service: Needs >25% AND >$25 increase to alert
 - Critical: Any AI service increase >$100 triggers immediate alert
+
+**Note**: Since we compare full days, anomalies are detected based on the total daily spend. Today's data may be incomplete, so some anomalies might be due to delayed cost reporting.
 
 ## 🔧 Advanced Configuration
 
@@ -325,10 +327,12 @@ aws logs filter-log-events \
 Extremely minimal:
 
 - **Lambda**: ~$0.50/month (120 invocations × 1 minute × 512MB)
-- **SES**: $0.10 per 1,000 emails
-- **Cost Explorer API**: Free (under 1M requests/month)
+- **SES**: $0.10 per 1,000 emails  
+- **Cost Explorer API**: ~$0.16/day ($5/month) - 4 API calls per invocation × 4 times daily = 16 calls/day @ $0.01/call
 - **EventBridge**: Free tier
-- **Total**: Less than $1/month
+- **Total**: ~$5-6/month
+
+**Cost Optimization Note**: We use DAILY granularity for all queries to minimize Cost Explorer API costs. Using HOURLY granularity would be significantly more expensive and wouldn't provide much additional value for anomaly detection.
 
 ## 🗑️ Uninstall
 

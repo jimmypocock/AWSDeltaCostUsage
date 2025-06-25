@@ -144,11 +144,9 @@ class TestGetTimezoneAwareDates:
         # In June, it's CDT (UTC-5), so 2:30 PM UTC = 9:30 AM CDT
         dates = get_timezone_aware_dates("US/Central")
 
-        # Today so far should be from midnight CDT to current time
-        assert (
-            dates["today_so_far"][0] == "2024-06-11"
-        )  # Midnight CDT = 5 AM UTC on same day
-        assert dates["today_so_far"][1] == "2024-06-12"  # Tomorrow for Cost Explorer
+        # Today should be from midnight CDT to midnight tomorrow (dates only)
+        assert dates["today_so_far"][0] == "2024-06-11"  # Today in UTC
+        assert dates["today_so_far"][1] == "2024-06-12"  # Tomorrow
 
         # Yesterday should be full day
         assert dates["yesterday_full"][0] == "2024-06-10"
@@ -198,14 +196,14 @@ class TestAnalyzeAllPeriods:
         assert "123456789013" in analysis["periods"]["today_so_far"]["accounts"]
 
     @freeze_time("2024-06-11 14:30:00")  # 9:30 AM CDT
-    def test_anomaly_detection_prorated(self, sample_cost_data_periods):
-        # At 9:30 AM, we're 9.5 hours into the day
-        # Yesterday's EC2 was $100 for full day, so prorated = $100 * (9.5/24) = $39.58
+    def test_anomaly_detection_full_days(self, sample_cost_data_periods):
+        # Now comparing full days (no proration)
+        # Yesterday's EC2 was $100, today is $50
         # For anomaly: need both >50% and >$50 increase
 
         # Modify today's cost to trigger anomaly
-        # Need today's cost to be > $39.58 + $50 = ~$90
-        sample_cost_data_periods["today_so_far"]["123456789012"]["Amazon EC2"] = 95.0
+        # Need today's cost to be > $100 + $50 = $150 AND >50% increase
+        sample_cost_data_periods["today_so_far"]["123456789012"]["Amazon EC2"] = 160.0
 
         analysis = analyze_all_periods(sample_cost_data_periods)
 
@@ -213,9 +211,9 @@ class TestAnalyzeAllPeriods:
         assert len(analysis["anomalies"]) > 0
         anomaly = analysis["anomalies"][0]
         assert anomaly["service"] == "Amazon EC2"
-        assert anomaly["today_cost"] == 95.0
-        # Expected cost should be around 39.58 (100 * 9.5/24)
-        assert 39 < anomaly["expected_cost"] < 40
+        assert anomaly["today_cost"] == 160.0
+        # Expected cost should be yesterday's full day cost
+        assert anomaly["expected_cost"] == 100.0
 
     def test_ai_service_alert_detection(self, sample_cost_data_periods):
         # Increase Bedrock cost significantly
@@ -321,7 +319,7 @@ class TestEmailGeneration:
         assert "09:30 AM CDT" in body
 
         # Check four metric boxes
-        assert "Today (9.5 hours)" in body
+        assert "Today (Full Day)" in body
         assert "$135.00" in body
         assert "Yesterday (Full Day)" in body
         assert "$250.00" in body
@@ -332,7 +330,7 @@ class TestEmailGeneration:
 
         # Check timezone info
         assert "US/Central" in body
-        assert "midnight to 09:30 AM CDT" in body
+        assert "Data may be incomplete" in body
 
         # Check AI service note
         assert "Yellow highlighted rows indicate AI services" in body
@@ -491,6 +489,29 @@ class TestTimezoneEdgeCases:
             assert len(dates) == 4  # All four periods
 
 
+class TestCostExplorerDateFormat:
+    """Test that date formats are correct for Cost Explorer API"""
+
+    @freeze_time("2024-06-11 18:00:00")  # 6 PM UTC = 1 PM CDT
+    def test_all_periods_use_date_format(self):
+        """Test that all periods use date-only format (YYYY-MM-DD)"""
+        dates = get_timezone_aware_dates("US/Central")
+
+        # All periods should use date-only format for daily granularity
+        # Should be YYYY-MM-DD format
+        for period in [
+            "today_so_far",
+            "yesterday_full",
+            "month_to_date",
+            "previous_month_full",
+        ]:
+            assert "T" not in dates[period][0]
+            assert "T" not in dates[period][1]
+            assert len(dates[period][0]) == 10
+            assert dates[period][0][4] == "-"
+            assert dates[period][0][7] == "-"
+
+
 class TestEmailContentAccuracy:
     """Test that email content matches the new data structure"""
 
@@ -514,8 +535,8 @@ class TestEmailContentAccuracy:
         # Should NOT mention "every 6 hours" anymore
         assert "every 6 hours" not in body
 
+        # Should NOT show hours anymore
+        assert "Today (13.0 hours)" not in body
+
         # Should show timezone info
         assert "US/Central timezone" in body
-
-        # Should show today's coverage correctly
-        assert "Today (13.0 hours)" in body  # 1 PM = 13 hours
