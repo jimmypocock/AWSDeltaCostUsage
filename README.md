@@ -2,7 +2,7 @@
 
 A timezone-aware AWS cost monitoring solution that sends detailed reports 4 times daily and alerts on anomalies to prevent surprise bills. Perfect for catching runaway costs from expensive services like AWS Comprehend, Bedrock, and other AI services before they impact your budget.
 
-> **💰 Running Cost**: This tool costs approximately **$1.20/month** to operate (see [cost breakdown](#-monthly-running-cost-120) below)
+> **💰 Running Cost**: This tool costs approximately **$5-12/month** to operate (see [cost breakdown](#-monthly-running-cost-5-12) below)
 > 
 > **💡 Pro Tip**: Keep this in a public GitHub repository to get free GitHub Actions CI/CD - no additional costs!
 
@@ -70,15 +70,18 @@ The system **automatically handles DST transitions**:
 - When clocks "fall back", your 7 AM report stays at 7 AM
 - No manual adjustments needed - ever!
 
-## 💰 Monthly Running Cost: ~$1.20
+## 💰 Monthly Running Cost: ~$5-12
 
-**Important**: This tool costs approximately **$1.20/month** to run, primarily from AWS Cost Explorer API charges:
+**Important**: This tool costs approximately **$5-12/month** to run, primarily from AWS Cost Explorer API charges:
 
-- **Cost Explorer API**: $1.20/month ($0.01 per API call × 120 calls)
+- **Cost Explorer API**: $4.80-$12/month
+  - Each API call costs $0.01 (no free tier)
+  - 4-10 API calls per Lambda invocation (depending on pagination)
+  - 4 runs daily × 30 days = 480-1,200 API calls/month
 - **Other AWS services**: ~$0.10/month (Lambda, SES, CloudWatch Logs)
-- **Total**: ~$1.30/month
+- **Total**: ~$5-12/month
 
-*Note: There is NO free tier for the Cost Explorer API. Each API call costs $0.01 from the first request.*
+*Note: Actual cost depends on number of AWS accounts and services used. Organizations with many accounts may see costs toward the higher end.*
 
 ## 🚀 Quick Start
 
@@ -285,7 +288,7 @@ Schedule: rate(6 hours)
 - **Conservative retry logic**: Max 2 attempts per API call
 - **Pagination limits**: Max 10 pages per query
 - **Lambda timeout**: 5-minute hard limit
-- **API call limit**: Only 16 Cost Explorer calls per day
+- **API call limit**: 16-40 Cost Explorer calls per day (4-10 per run)
 - **Free tier friendly**: Well under the 1M free API calls/month
 
 ### Monitored AI Services
@@ -340,13 +343,15 @@ aws logs filter-log-events \
 
 ## 💰 Detailed Cost Breakdown
 
-As mentioned at the top, this tool costs approximately **$1.20/month** to run:
+As mentioned at the top, this tool costs approximately **$5-12/month** to run:
 
-### Cost Explorer API (90% of total cost)
+### Cost Explorer API (98% of total cost)
 - **No free tier** - $0.01 per API request from the first call
-- 1 API call per Lambda execution (fetches all time periods in one request)
-- 4 executions daily × 30 days = 120 API calls/month
-- 120 × $0.01 = **$1.20/month**
+- 4-10 API calls per Lambda execution:
+  - 1 call each for: today, yesterday, month-to-date, previous month
+  - Additional calls if results paginate (many accounts/services)
+- 4 executions daily × 30 days = 120 Lambda invocations/month
+- 480-1,200 API calls/month × $0.01 = **$4.80-$12/month**
 
 ### Other AWS Services
 - **Lambda**: ~$0.03/month (well within free tier)
@@ -355,7 +360,14 @@ As mentioned at the top, this tool costs approximately **$1.20/month** to run:
 - **EventBridge**: FREE (no charges for scheduled rules)
 
 ### Cost Optimization
-We use DAILY granularity for all queries to keep costs at ~$1.20/month. Using HOURLY granularity would increase costs to $30+ per month due to the increased number of API calls required.
+We use DAILY granularity for all queries to keep costs reasonable. Using HOURLY granularity would increase costs to $100+ per month due to 24x more data points causing heavy pagination.
+
+### Cost Safety Features
+- **Maximum 10 pages per query** - Hard limit prevents runaway pagination
+- **Conservative retry logic** - Only 1 retry (2 total attempts) per API call
+- **Lambda timeout** - 5-minute limit caps total execution time
+- **No recursive calls** - Lambda doesn't invoke itself
+- **Worst case scenario**: ~$48/month (if every query hit max pagination)
 
 ## 🗑️ Uninstall
 

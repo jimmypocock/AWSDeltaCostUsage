@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple
 
@@ -170,28 +171,39 @@ def lambda_handler(event, context):
         accounts = get_organization_accounts()
 
         # Fetch costs for each period (all using DAILY granularity)
-        costs_data = {
-            "today_so_far": get_costs_by_service_and_account(
-                date_ranges["today_so_far"][0],
-                date_ranges["today_so_far"][1],
-                accounts,
-            ),
-            "yesterday_full": get_costs_by_service_and_account(
-                date_ranges["yesterday_full"][0],
-                date_ranges["yesterday_full"][1],
-                accounts,
-            ),
-            "month_to_date": get_costs_by_service_and_account(
-                date_ranges["month_to_date"][0],
-                date_ranges["month_to_date"][1],
-                accounts,
-            ),
-            "previous_month_full": get_costs_by_service_and_account(
-                date_ranges["previous_month_full"][0],
-                date_ranges["previous_month_full"][1],
-                accounts,
-            ),
-        }
+        # Add delays between API calls to avoid rate limiting
+        costs_data = {}
+
+        print("Fetching today's costs...")
+        costs_data["today_so_far"] = get_costs_by_service_and_account(
+            date_ranges["today_so_far"][0],
+            date_ranges["today_so_far"][1],
+            accounts,
+        )
+        time.sleep(1.5)  # Delay to avoid rate limiting
+
+        print("Fetching yesterday's costs...")
+        costs_data["yesterday_full"] = get_costs_by_service_and_account(
+            date_ranges["yesterday_full"][0],
+            date_ranges["yesterday_full"][1],
+            accounts,
+        )
+        time.sleep(1.5)  # Delay to avoid rate limiting
+
+        print("Fetching month-to-date costs...")
+        costs_data["month_to_date"] = get_costs_by_service_and_account(
+            date_ranges["month_to_date"][0],
+            date_ranges["month_to_date"][1],
+            accounts,
+        )
+        time.sleep(1.5)  # Delay to avoid rate limiting
+
+        print("Fetching previous month costs...")
+        costs_data["previous_month_full"] = get_costs_by_service_and_account(
+            date_ranges["previous_month_full"][0],
+            date_ranges["previous_month_full"][1],
+            accounts,
+        )
 
         # Analyze costs and detect anomalies
         cost_analysis = analyze_all_periods(costs_data)
