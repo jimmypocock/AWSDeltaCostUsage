@@ -46,7 +46,9 @@ ANOMALY_THRESHOLD_DOLLARS = float(os.environ.get("ANOMALY_THRESHOLD_DOLLARS", "5
 AI_SERVICE_MULTIPLIER = float(
     os.environ.get("AI_SERVICE_MULTIPLIER", "0.5")
 )  # Lower threshold for AI services
-USER_TIMEZONE = os.environ.get("USER_TIMEZONE", "US/Central")  # Default to Central Time
+USER_TIMEZONE = os.environ.get(
+    "USER_TIMEZONE", "America/Chicago"
+)  # Default to Central Time (IANA name required by EventBridge Scheduler)
 
 # High-cost AI services that need special monitoring
 AI_SERVICES = [
@@ -67,6 +69,7 @@ def get_timezone_aware_dates(user_tz_str: str) -> Dict[str, Tuple[str, str]]:
     Returns a dictionary with:
     - today_so_far: midnight to current time today
     - yesterday_full: midnight to midnight yesterday
+    - day_before_yesterday_full: the full day before yesterday
     - month_to_date: first of month to current time
     - previous_month_full: first to last of previous month
     """
@@ -92,6 +95,14 @@ def get_timezone_aware_dates(user_tz_str: str) -> Dict[str, Tuple[str, str]]:
     yesterday_end_user = today_start_user
     yesterday_start_utc = yesterday_start_user.astimezone(pytz.UTC)
     yesterday_end_utc = yesterday_end_user.astimezone(pytz.UTC)
+
+    # Day before yesterday (for the "settled" anomaly comparison vs yesterday)
+    day_before_yesterday_start_user = (now_user - timedelta(days=2)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    day_before_yesterday_start_utc = day_before_yesterday_start_user.astimezone(
+        pytz.UTC
+    )
 
     # Month to date
     month_start_user = now_user.replace(
@@ -132,6 +143,10 @@ def get_timezone_aware_dates(user_tz_str: str) -> Dict[str, Tuple[str, str]]:
             yesterday_start_utc.strftime("%Y-%m-%d"),
             yesterday_end_utc.strftime("%Y-%m-%d"),
         ),
+        "day_before_yesterday_full": (
+            day_before_yesterday_start_utc.strftime("%Y-%m-%d"),
+            yesterday_start_utc.strftime("%Y-%m-%d"),
+        ),
         "month_to_date": (
             month_start_utc.strftime("%Y-%m-%d"),
             (now_utc + timedelta(days=1)).strftime(
@@ -161,6 +176,10 @@ def lambda_handler(event, context):
             f"Yesterday: {date_ranges['yesterday_full'][0]} to {date_ranges['yesterday_full'][1]}"
         )
         print(
+            f"Day before yesterday: {date_ranges['day_before_yesterday_full'][0]} to "
+            f"{date_ranges['day_before_yesterday_full'][1]}"
+        )
+        print(
             f"Month to date: {date_ranges['month_to_date'][0]} to {date_ranges['month_to_date'][1]}"
         )
         print(
@@ -186,6 +205,14 @@ def lambda_handler(event, context):
         costs_data["yesterday_full"] = get_costs_by_service_and_account(
             date_ranges["yesterday_full"][0],
             date_ranges["yesterday_full"][1],
+            accounts,
+        )
+        time.sleep(1.5)  # Delay to avoid rate limiting
+
+        print("Fetching day-before-yesterday's costs...")
+        costs_data["day_before_yesterday_full"] = get_costs_by_service_and_account(
+            date_ranges["day_before_yesterday_full"][0],
+            date_ranges["day_before_yesterday_full"][1],
             accounts,
         )
         time.sleep(1.5)  # Delay to avoid rate limiting
@@ -355,54 +382,74 @@ def analyze_all_periods(costs_data: Dict) -> Dict:
             "accounts": period_by_account,
         }
 
-    # Check for anomalies between yesterday and today
-    if "yesterday_full" in costs_data and "today_so_far" in costs_data:
-        for account_id in costs_data["today_so_far"]:
-            today_services = costs_data["today_so_far"].get(account_id, {})
-            yesterday_services = costs_data["yesterday_full"].get(account_id, {})
+    # Detect anomalies with two comparisons:
+    # - "live": today so far vs yesterday. Catches a spike happening right now,
+    #   even though today's data is partial due to AWS reporting lag.
+    # - "settled": yesterday vs the day before. Catches a confirmed spike whose
+    #   costs only finished posting to Cost Explorer after yesterday's run.
+    if "today_so_far" in costs_data and "yesterday_full" in costs_data:
+        anomalies, ai_alerts = detect_anomalies(
+            costs_data["today_so_far"], costs_data["yesterday_full"], "live"
+        )
+        analysis["anomalies"].extend(anomalies)
+        analysis["ai_service_alerts"].extend(ai_alerts)
 
-            for service, today_cost in today_services.items():
-                yesterday_cost = yesterday_services.get(service, 0)
-
-                # Compare today's full day cost vs yesterday
-                # Note: Today's data may be incomplete if AWS hasn't reported all costs yet
-                if yesterday_cost > 0:
-                    delta_percent = calculate_percent_change(yesterday_cost, today_cost)
-                    delta_amount = today_cost - yesterday_cost
-
-                    # Check for anomalies
-                    is_ai_service = service in AI_SERVICES
-                    threshold_percent = (
-                        ANOMALY_THRESHOLD_PERCENT * AI_SERVICE_MULTIPLIER
-                        if is_ai_service
-                        else ANOMALY_THRESHOLD_PERCENT
-                    )
-                    threshold_dollars = (
-                        ANOMALY_THRESHOLD_DOLLARS * AI_SERVICE_MULTIPLIER
-                        if is_ai_service
-                        else ANOMALY_THRESHOLD_DOLLARS
-                    )
-
-                    if (
-                        delta_percent > threshold_percent
-                        and delta_amount > threshold_dollars
-                    ):
-                        anomaly = {
-                            "account_id": account_id,
-                            "service": service,
-                            "today_cost": today_cost,
-                            "expected_cost": yesterday_cost,
-                            "delta": delta_amount,
-                            "delta_percent": delta_percent,
-                            "is_ai_service": is_ai_service,
-                        }
-
-                        if is_ai_service:
-                            analysis["ai_service_alerts"].append(anomaly)
-                        else:
-                            analysis["anomalies"].append(anomaly)
+    if "yesterday_full" in costs_data and "day_before_yesterday_full" in costs_data:
+        anomalies, ai_alerts = detect_anomalies(
+            costs_data["yesterday_full"],
+            costs_data["day_before_yesterday_full"],
+            "settled",
+        )
+        analysis["anomalies"].extend(anomalies)
+        analysis["ai_service_alerts"].extend(ai_alerts)
 
     return analysis
+
+
+def detect_anomalies(
+    current_costs: Dict, baseline_costs: Dict, comparison: str
+) -> Tuple[List[Dict], List[Dict]]:
+    """Compare two periods of costs and return (anomalies, ai_service_alerts).
+
+    A service is flagged when its increase clears BOTH the percentage and the
+    dollar threshold. AI services use a lower (more sensitive) threshold.
+    """
+    anomalies: List[Dict] = []
+    ai_alerts: List[Dict] = []
+
+    for account_id, current_services in current_costs.items():
+        baseline_services = baseline_costs.get(account_id, {})
+
+        for service, current_cost in current_services.items():
+            baseline_cost = baseline_services.get(service, 0)
+            if baseline_cost <= 0:
+                continue
+
+            delta_amount = current_cost - baseline_cost
+            delta_percent = calculate_percent_change(baseline_cost, current_cost)
+
+            is_ai_service = service in AI_SERVICES
+            multiplier = AI_SERVICE_MULTIPLIER if is_ai_service else 1
+            threshold_percent = ANOMALY_THRESHOLD_PERCENT * multiplier
+            threshold_dollars = ANOMALY_THRESHOLD_DOLLARS * multiplier
+
+            if delta_percent > threshold_percent and delta_amount > threshold_dollars:
+                anomaly = {
+                    "account_id": account_id,
+                    "service": service,
+                    "current_cost": current_cost,
+                    "baseline_cost": baseline_cost,
+                    "delta": delta_amount,
+                    "delta_percent": delta_percent,
+                    "is_ai_service": is_ai_service,
+                    "comparison": comparison,
+                }
+                if is_ai_service:
+                    ai_alerts.append(anomaly)
+                else:
+                    anomalies.append(anomaly)
+
+    return anomalies, ai_alerts
 
 
 def check_for_immediate_alerts(analysis: Dict) -> List[Dict]:
@@ -425,7 +472,7 @@ def check_for_immediate_alerts(analysis: Dict) -> List[Dict]:
 
     # Check for extreme increases in today's costs
     for anomaly in analysis["anomalies"]:
-        if anomaly["delta_percent"] > 500 and anomaly["today_cost"] > 10:
+        if anomaly["delta_percent"] > 500 and anomaly["current_cost"] > 10:
             alerts.append(
                 {
                     "type": "EXTREME_INCREASE",
@@ -519,7 +566,7 @@ def generate_email_body(
     today_total = analysis["periods"]["today_so_far"]["total"]
     html += f"""
                 <div class="metric-box">
-                    <div class="metric-label">Today (Full Day)</div>
+                    <div class="metric-label">Today (so far)</div>
                     <div class="metric-value">${today_total:.2f}</div>
                 </div>
     """
@@ -557,8 +604,15 @@ def generate_email_body(
     # Add anomalies section if any
     if analysis["anomalies"] or analysis["ai_service_alerts"]:
         html += "<h2>⚠️ Detected Anomalies</h2>"
-        html += "<p>Comparing today's costs vs yesterday (note: today's data may be incomplete):</p>"
+        html += (
+            "<p>Live (today vs yesterday) and settled (yesterday vs prior day) "
+            "comparisons — today's data is still partial:</p>"
+        )
 
+        comparison_labels = {
+            "live": "today vs yesterday (today still in progress)",
+            "settled": "yesterday vs prior day (settled)",
+        }
         all_anomalies = analysis["anomalies"] + analysis["ai_service_alerts"]
         for anomaly in sorted(all_anomalies, key=lambda x: x["delta"], reverse=True):
             severity = (
@@ -566,11 +620,13 @@ def generate_email_body(
                 if anomaly["is_ai_service"] and anomaly["delta"] > 100
                 else "warning"
             )
+            label = comparison_labels.get(anomaly.get("comparison"), "")
             html += f"""
                 <div class="{severity}">
-                    <strong>{anomaly['service']}</strong> in account {anomaly['account_id']}<br>
-                    Current: ${anomaly['today_cost']:.2f} |
-                    Expected: ${anomaly['expected_cost']:.2f} |
+                    <strong>{anomaly['service']}</strong> in account {anomaly['account_id']}
+                    <span style="font-size: 12px; opacity: 0.85;">— {label}</span><br>
+                    Current: ${anomaly['current_cost']:.2f} |
+                    Baseline: ${anomaly['baseline_cost']:.2f} |
                     Increase: ${anomaly['delta']:.2f} ({anomaly['delta_percent']:.1f}%)
                 </div>
             """
@@ -620,10 +676,11 @@ def generate_email_body(
     html += f"""
         <div class="footer">
             <p>This report shows costs in {timezone} timezone.</p>
-            <p>Today's costs show the full day (midnight to midnight).</p>
-            <p>Data may be incomplete as AWS can take up to 24 hours to report all costs.</p>
+            <p>"Today (so far)" is partial — the day is still in progress and AWS can
+               take up to 24 hours to report all costs.</p>
             <p>Yellow highlighted rows indicate AI services with enhanced monitoring.</p>
-            <p>Anomaly detection compares today vs yesterday's full day costs.</p>
+            <p>Anomaly detection compares today vs yesterday (live) and yesterday vs
+               the prior day (settled).</p>
         </div>
     </body>
     </html>

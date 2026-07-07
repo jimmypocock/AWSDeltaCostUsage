@@ -57,13 +57,14 @@ aws cloudformation delete-stack --stack-name AWSDeltaCostUsage
 
 ## Architecture Overview
 
-This AWS Lambda function monitors AWS costs across all accounts in an AWS Organization and sends email alerts for anomalies. It runs at specific times daily (7 AM, 1 PM, 6 PM, 11 PM CT) via EventBridge.
+This AWS Lambda function monitors AWS costs across all accounts in an AWS Organization and sends email alerts for anomalies. It runs once daily at 9 PM local time via EventBridge Scheduler (timezone-aware, so it stays fixed across daylight saving).
 
 ### Key Components:
 - **src/lambda_function.py**: Main Lambda handler that:
   - Fetches costs for multiple time periods (all using DAILY granularity):
-    - Today full day (midnight to midnight) - may be incomplete
+    - Today so far (partial - AWS reporting lags)
     - Yesterday full day (midnight to midnight)
+    - Day before yesterday (for the settled anomaly comparison)
     - Month-to-date (1st of month to today)
     - Previous month full (complete previous month)
   - Uses YYYY-MM-DD date format for all Cost Explorer API calls
@@ -72,12 +73,12 @@ This AWS Lambda function monitors AWS costs across all accounts in an AWS Organi
   - Sends HTML-formatted email reports via SES
   - Special handling for expensive AI services (Comprehend, Bedrock, etc.)
   - Shows costs in user's local timezone
-  - Cost optimization: Uses DAILY granularity to minimize API costs (~$5-12/month vs $100+/month for hourly)
+  - Cost optimization: Uses DAILY granularity to minimize API costs (~$1.50-3/month vs $100+/month for hourly)
 
 - **template.yaml**: SAM template defining:
   - Lambda function with 5-minute timeout
   - Python 3.12 runtime
-  - EventBridge schedule (7 AM, 1 PM, 6 PM, 11 PM Central Time)
+  - EventBridge Scheduler (ScheduleV2) - once daily at 9 PM local, timezone-aware
   - IAM permissions for Cost Explorer, Organizations, and SES
   - Environment variables for configuration (no hardcoded emails)
 
@@ -89,7 +90,9 @@ This AWS Lambda function monitors AWS costs across all accounts in an AWS Organi
   - Provides post-deployment instructions with correct commands
 
 ### Cost Anomaly Detection Logic:
-- Compares today's full day costs vs yesterday's full day
+- Two comparisons via the shared `detect_anomalies()` helper:
+  - Live: today so far vs yesterday (catches a spike happening now, despite partial data)
+  - Settled: yesterday vs day-before-yesterday (backstop for costs that post a day late)
 - Normal services: Alert when BOTH percentage (50%) AND dollar amount ($50) thresholds exceeded
 - AI services: More sensitive monitoring with 0.5x multiplier (25% and $25)
 - Critical alerts: Immediate notification for $100+ AI service increases
@@ -98,13 +101,13 @@ This AWS Lambda function monitors AWS costs across all accounts in an AWS Organi
 ### Email Report Structure:
 - HTML-formatted with clean visual design
 - Four key metrics displayed prominently:
-  - Today (Full Day) - may be incomplete
+  - Today (so far) - partial, day still in progress
   - Yesterday (Full Day) 
   - Month-to-date total
   - Previous month full total
 - Account-level breakdown with service details
 - AI services highlighted with yellow background
-- Anomaly detection comparing today vs yesterday full days
+- Anomaly detection: live (today vs yesterday) and settled (yesterday vs prior day)
 - All times shown in user's configured timezone
 - Filters out negligible costs (<$0.01)
 - Includes note about AWS Cost Explorer potential delays and incomplete today data
@@ -113,7 +116,7 @@ This AWS Lambda function monitors AWS costs across all accounts in an AWS Organi
 - Reads from .env file (gitignored for security)
 - Supports environment variables
 - Accepts command-line overrides
-- Timezone configuration with DST support (default: US/Central)
+- Timezone configuration with DST support (default: America/Chicago; IANA names required by EventBridge Scheduler)
 - No hardcoded sensitive information
 - .env.example provided as template
 

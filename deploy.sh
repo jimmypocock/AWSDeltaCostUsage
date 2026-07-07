@@ -28,7 +28,7 @@ while [[ "$#" -gt 0 ]]; do
             echo "  --profile <profile>      AWS profile to use"
             echo "  --email-to <email>       Email address to receive reports"
             echo "  --email-from <email>     Email address to send reports from"
-            echo "  --timezone <tz>          Timezone for reports (default: US/Central)"
+            echo "  --timezone <tz>          IANA timezone for reports (default: America/Chicago)"
             echo "  --stack-name <name>      CloudFormation stack name (default: AWSDeltaCostUsage)"
             echo "  -h, --help              Show this help message"
             echo ""
@@ -175,6 +175,6 @@ else
     echo "   aws logs tail /aws/lambda/aws-cost-monitor --follow"
 fi
 echo ""
-echo "4. The function will run automatically every 6 hours"
+echo "4. The function will run automatically once daily at 9 PM (your configured timezone)"
 echo ""
 echo "⚠️  Important: Make sure to complete email verification in SES before the function runs!"

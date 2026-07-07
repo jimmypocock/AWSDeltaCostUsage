@@ -211,9 +211,9 @@ class TestAnalyzeAllPeriods:
         assert len(analysis["anomalies"]) > 0
         anomaly = analysis["anomalies"][0]
         assert anomaly["service"] == "Amazon EC2"
-        assert anomaly["today_cost"] == 160.0
-        # Expected cost should be yesterday's full day cost
-        assert anomaly["expected_cost"] == 100.0
+        assert anomaly["current_cost"] == 160.0
+        # Baseline cost should be yesterday's full day cost
+        assert anomaly["baseline_cost"] == 100.0
 
     def test_ai_service_alert_detection(self, sample_cost_data_periods):
         # Increase Bedrock cost significantly
@@ -258,7 +258,7 @@ class TestCheckForImmediateAlerts:
                 {
                     "service": "Amazon EC2",
                     "delta_percent": 600.0,  # 600% increase
-                    "today_cost": 50.0,  # Over $10
+                    "current_cost": 50.0,  # Over $10
                     "delta": 42.0,
                     "account_id": "123456789012",
                 }
@@ -319,7 +319,7 @@ class TestEmailGeneration:
         assert "09:30 AM CDT" in body
 
         # Check four metric boxes
-        assert "Today (Full Day)" in body
+        assert "Today (so far)" in body
         assert "$135.00" in body
         assert "Yesterday (Full Day)" in body
         assert "$250.00" in body
@@ -330,7 +330,7 @@ class TestEmailGeneration:
 
         # Check timezone info
         assert "US/Central" in body
-        assert "Data may be incomplete" in body
+        assert "still in progress" in body
 
         # Check AI service note
         assert "Yellow highlighted rows indicate AI services" in body
@@ -440,8 +440,8 @@ class TestLambdaHandler:
             assert result["statusCode"] == 200
             assert "Cost report sent successfully" in result["body"]
 
-            # Verify CE was called for all four periods
-            assert mock_ce.get_cost_and_usage.call_count == 4
+            # Verify CE was called for all five periods
+            assert mock_ce.get_cost_and_usage.call_count == 5
 
     def test_error_handling(self, lambda_context, mock_env_vars):
         with patch("lambda_function.get_organization_accounts") as mock_get_accounts:
@@ -486,7 +486,7 @@ class TestTimezoneEdgeCases:
         for tz in ["Europe/London", "Asia/Tokyo", "Australia/Sydney"]:
             dates = get_timezone_aware_dates(tz)
             assert dates is not None
-            assert len(dates) == 4  # All four periods
+            assert len(dates) == 5  # today, yesterday, day-before, MTD, prev month
 
 
 class TestCostExplorerDateFormat:

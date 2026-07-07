@@ -60,7 +60,7 @@ Before deploying to production:
 
 ### 5. **Simple Monitoring**
 
-Since the Lambda runs only 4 times daily and sends error emails, you can simply:
+Since the Lambda runs once daily and sends error emails, you can simply:
 
 ```bash
 # Check recent executions

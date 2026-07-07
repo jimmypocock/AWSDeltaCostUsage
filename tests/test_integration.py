@@ -200,8 +200,8 @@ class TestLambdaIntegration:
             assert result["statusCode"] == 200
             assert "Cost report sent successfully" in result["body"]
 
-            # Verify Cost Explorer was called for all 4 periods
-            assert mock_ce_client.get_cost_and_usage.call_count == 4
+            # Verify Cost Explorer was called for all 5 periods
+            assert mock_ce_client.get_cost_and_usage.call_count == 5
 
     @freeze_time("2024-06-11 23:00:00")  # 11 PM UTC = 6 PM CDT
     def test_anomaly_detection_flow(self, setup_aws_environment, lambda_context):
@@ -471,5 +471,5 @@ class TestLambdaIntegration:
                 assert "Month to Date" in body
                 assert "Full Month" in body
 
-                # Verify Cost Explorer was called 4 times
-                assert mock_ce_client.get_cost_and_usage.call_count == 4
+                # Verify Cost Explorer was called 5 times
+                assert mock_ce_client.get_cost_and_usage.call_count == 5

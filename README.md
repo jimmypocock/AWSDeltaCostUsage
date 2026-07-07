@@ -1,8 +1,8 @@
 # AWS Cost Monitor
 
-A timezone-aware AWS cost monitoring solution that sends detailed reports 4 times daily and alerts on anomalies to prevent surprise bills. Perfect for catching runaway costs from expensive services like AWS Comprehend, Bedrock, and other AI services before they impact your budget.
+A timezone-aware AWS cost monitoring solution that sends a detailed report once daily and alerts on anomalies to prevent surprise bills. Perfect for catching runaway costs from expensive services like AWS Comprehend, Bedrock, and other AI services before they impact your budget.
 
-> **💰 Running Cost**: This tool costs approximately **$5-12/month** to operate (see [cost breakdown](#-monthly-running-cost-5-12) below)
+> **💰 Running Cost**: This tool costs approximately **$1.50–3/month** to operate (see [cost breakdown](#-monthly-running-cost) below)
 > 
 > **💡 Pro Tip**: Keep this in a public GitHub repository to get free GitHub Actions CI/CD - no additional costs!
 
@@ -10,7 +10,7 @@ A timezone-aware AWS cost monitoring solution that sends detailed reports 4 time
 
 This serverless solution automatically monitors your AWS costs across all accounts in your AWS Organization and:
 
-- 📊 **Smart Reporting**: Sends reports at 7 AM, 1 PM, 6 PM, and 11 PM in YOUR timezone
+- 📊 **Smart Reporting**: Sends one report daily at 9 PM in YOUR timezone
 - 🌍 **Global Timezone Support**: Works anywhere in the world with automatic DST handling
 - 📈 **Four Time Periods**: Today so far, Yesterday full, Month-to-date, Previous month full
 - 🚨 **Intelligent Alerts**: Immediate notifications when costs spike unexpectedly
@@ -23,7 +23,7 @@ This serverless solution automatically monitors your AWS costs across all accoun
 
 Each email report includes four key metrics displayed prominently:
 
-1. **Today (Full Day)** - Today's costs from midnight to midnight (may be incomplete)
+1. **Today (so far)** - Today's costs so far (partial — AWS reporting can lag up to 24h)
 2. **Yesterday (Full Day)** - Complete 24-hour costs from the previous day
 3. **Month to Date** - Running total from the 1st to now
 4. **Previous Month** - Last month's complete total for comparison
@@ -37,11 +37,12 @@ The system supports **all global timezones** with automatic Daylight Saving Time
 ### Popular Timezone Examples
 
 ```bash
-# United States
-USER_TIMEZONE=US/Eastern      # New York, Miami, Atlanta
-USER_TIMEZONE=US/Central      # Chicago, Dallas, Houston (default)
-USER_TIMEZONE=US/Mountain     # Denver, Phoenix
-USER_TIMEZONE=US/Pacific      # Los Angeles, Seattle, San Francisco
+# United States (use canonical IANA names — EventBridge Scheduler rejects US/* aliases)
+USER_TIMEZONE=America/New_York    # New York, Miami, Atlanta
+USER_TIMEZONE=America/Chicago     # Chicago, Dallas, Houston (default)
+USER_TIMEZONE=America/Denver      # Denver
+USER_TIMEZONE=America/Phoenix     # Phoenix (no DST)
+USER_TIMEZONE=America/Los_Angeles # Los Angeles, Seattle, San Francisco
 
 # Europe
 USER_TIMEZONE=Europe/London   # UK
@@ -70,16 +71,16 @@ The system **automatically handles DST transitions**:
 - When clocks "fall back", your 7 AM report stays at 7 AM
 - No manual adjustments needed - ever!
 
-## 💰 Monthly Running Cost: ~$5-12
+## 💰 Monthly Running Cost
 
-**Important**: This tool costs approximately **$5-12/month** to run, primarily from AWS Cost Explorer API charges:
+**Important**: This tool costs approximately **$1.50–3/month** to run, primarily from AWS Cost Explorer API charges:
 
-- **Cost Explorer API**: $4.80-$12/month
+- **Cost Explorer API**: $1.50-$3/month
   - Each API call costs $0.01 (no free tier)
-  - 4-10 API calls per Lambda invocation (depending on pagination)
-  - 4 runs daily × 30 days = 480-1,200 API calls/month
-- **Other AWS services**: ~$0.10/month (Lambda, SES, CloudWatch Logs)
-- **Total**: ~$5-12/month
+  - 5-11 API calls per Lambda invocation (depending on pagination)
+  - 1 run daily × 30 days = 150-330 API calls/month
+- **Other AWS services**: ~$0.05/month (Lambda, SES, CloudWatch Logs, EventBridge Scheduler)
+- **Total**: ~$1.50–3/month
 
 *Note: Actual cost depends on number of AWS accounts and services used. Organizations with many accounts may see costs toward the higher end.*
 
@@ -182,7 +183,7 @@ December 15, 2024 at 1:00 PM EST
 
 Four metric boxes displaying:
 
-- **Today (X.X hours)**: $XXX.XX
+- **Today (so far)**: $XXX.XX (partial — the day is still in progress)
 - **Yesterday (Full Day)**: $XXX.XX
 - **Month to Date**: $X,XXX.XX
 - **November (Full Month)**: $X,XXX.XX
@@ -193,7 +194,7 @@ When detected, shows:
 
 - 🚨 Critical alerts for AI service spikes over $100
 - ⚠️ Warnings for services exceeding thresholds
-- Comparison between today's prorated costs vs yesterday
+- Both a **live** (today vs yesterday) and **settled** (yesterday vs prior day) comparison
 
 ### Detailed Breakdown
 
@@ -204,11 +205,12 @@ When detected, shows:
 
 ## 🎯 Anomaly Detection Logic
 
-The system uses intelligent anomaly detection:
+The system uses intelligent anomaly detection with two comparisons:
 
-1. **Daily Comparison**: Compares today's full day costs vs yesterday's full day
-2. **Dual Thresholds**: Both percentage AND dollar thresholds must be exceeded
-3. **AI Service Sensitivity**: AI services use 0.5x multiplier (more sensitive)
+1. **Live** (today so far vs yesterday): catches a spike happening *right now*, even though today's data is still partial due to AWS reporting lag.
+2. **Settled** (yesterday vs the day before): the backstop — catches a confirmed spike whose costs only finished posting to Cost Explorer after the prior run.
+3. **Dual Thresholds**: both percentage AND dollar thresholds must be exceeded.
+4. **AI Service Sensitivity**: AI services use a 0.5x multiplier (more sensitive).
 
 Example scenarios:
 
@@ -216,7 +218,7 @@ Example scenarios:
 - AI service: Needs >25% AND >$25 increase to alert
 - Critical: Any AI service increase >$100 triggers immediate alert
 
-**Note**: Since we compare full days, anomalies are detected based on the total daily spend. Today's data may be incomplete, so some anomalies might be due to delayed cost reporting.
+**Note**: The live comparison weighs a partial "today" against a full "yesterday," so it only fires when something is genuinely running away (e.g., a runaway Lambda hammering Bedrock). The settled comparison covers costs that post a day late.
 
 ## 🔧 Advanced Configuration
 
@@ -246,7 +248,7 @@ All settings can be configured via environment variables:
 | --------------------------- | -------- | ---------- | -------------------------------------- |
 | `EMAIL_TO`                  | Yes      | -          | Recipient emails (comma-separated)     |
 | `EMAIL_FROM`                | Yes      | -          | Sender email (must be SES verified)    |
-| `USER_TIMEZONE`             | No       | US/Central | Your local timezone                    |
+| `USER_TIMEZONE`             | No       | America/Chicago | Your local timezone (IANA name)   |
 | `AWS_PROFILE`               | No       | default    | AWS CLI profile to use                 |
 | `ANOMALY_THRESHOLD_PERCENT` | No       | 50         | Percentage increase threshold          |
 | `ANOMALY_THRESHOLD_DOLLARS` | No       | 50         | Dollar amount increase threshold       |
@@ -254,23 +256,18 @@ All settings can be configured via environment variables:
 
 ### Customizing Schedule Times
 
-The default schedule (7 AM, 1 PM, 6 PM, 11 PM) is defined in `template.yaml`. To change:
-
-1. Note your timezone's UTC offset
-2. Calculate the UTC hours for your desired local times
-3. Update the cron expression:
+The default schedule (once daily at 9 PM local time) is defined in `template.yaml`. Because it uses **EventBridge Scheduler** with `ScheduleExpressionTimezone`, the cron is written in *your local time* — no UTC conversion needed, and it stays fixed across daylight saving.
 
 ```yaml
-# Current: 7 AM, 1 PM, 6 PM, 11 PM Central Time
-Schedule: cron(0 13,19,0,5 * * ? *)
+# Current: 9 PM local time, every day
+ScheduleExpression: cron(0 21 * * ? *)
+ScheduleExpressionTimezone: !Ref UserTimezone
 
-# Example: 9 AM and 5 PM Eastern Time (UTC-5)
-# 9 AM EST = 2 PM UTC, 5 PM EST = 10 PM UTC
-Schedule: cron(0 14,22 * * ? *)
+# Example: 8 AM every day
+ScheduleExpression: cron(0 8 * * ? *)
 
-# Example: Every 6 hours starting at midnight local time
-# Calculate midnight in UTC for your timezone
-Schedule: rate(6 hours)
+# Example: twice daily, 8 AM and 8 PM
+ScheduleExpression: cron(0 8,20 * * ? *)
 ```
 
 ## 🛡️ Security & Cost Safety
@@ -288,7 +285,7 @@ Schedule: rate(6 hours)
 - **Conservative retry logic**: Max 2 attempts per API call
 - **Pagination limits**: Max 10 pages per query
 - **Lambda timeout**: 5-minute hard limit
-- **API call limit**: 16-40 Cost Explorer calls per day (4-10 per run)
+- **API call limit**: 5-11 Cost Explorer calls per day (a single run)
 - **Free tier friendly**: Well under the 1M free API calls/month
 
 ### Monitored AI Services
@@ -345,19 +342,19 @@ aws logs filter-log-events \
 
 As mentioned at the top, this tool costs approximately **$5-12/month** to run:
 
-### Cost Explorer API (98% of total cost)
+### Cost Explorer API (most of total cost)
 - **No free tier** - $0.01 per API request from the first call
-- 4-10 API calls per Lambda execution:
-  - 1 call each for: today, yesterday, month-to-date, previous month
+- 5-11 API calls per Lambda execution:
+  - 1 call each for: today, yesterday, day-before-yesterday, month-to-date, previous month
   - Additional calls if results paginate (many accounts/services)
-- 4 executions daily × 30 days = 120 Lambda invocations/month
-- 480-1,200 API calls/month × $0.01 = **$4.80-$12/month**
+- 1 execution daily × 30 days = 30 Lambda invocations/month
+- 150-330 API calls/month × $0.01 = **$1.50-$3/month**
 
 ### Other AWS Services
-- **Lambda**: ~$0.03/month (well within free tier)
+- **Lambda**: ~$0.01/month (well within free tier)
 - **SES**: ~$0.02/month (under free tier for most users)
-- **CloudWatch Logs**: ~$0.05/month (minimal logging)
-- **EventBridge**: FREE (no charges for scheduled rules)
+- **CloudWatch Logs**: ~$0.02/month (minimal logging)
+- **EventBridge Scheduler**: FREE (first 14M invocations/month are free; we use ~30)
 
 ### Cost Optimization
 We use DAILY granularity for all queries to keep costs reasonable. Using HOURLY granularity would increase costs to $100+ per month due to 24x more data points causing heavy pagination.
@@ -367,7 +364,7 @@ We use DAILY granularity for all queries to keep costs reasonable. Using HOURLY 
 - **Conservative retry logic** - Only 1 retry (2 total attempts) per API call
 - **Lambda timeout** - 5-minute limit caps total execution time
 - **No recursive calls** - Lambda doesn't invoke itself
-- **Worst case scenario**: ~$48/month (if every query hit max pagination)
+- **Worst case scenario**: ~$15/month (if every query hit max pagination)
 
 ## 🗑️ Uninstall
 

@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: AWS Cost Monitor - Sends cost reports and anomaly alerts every 6 hours
+Description: AWS Cost Monitor - Sends a daily cost report and anomaly alerts
 
 Parameters:
   EmailTo:
@@ -28,8 +28,11 @@ Parameters:
   
   UserTimezone:
     Type: String
-    Default: US/Central
-    Description: Timezone for cost calculations and email reports (e.g., US/Eastern, US/Pacific, Europe/London)
+    Default: America/Chicago
+    Description: >-
+      IANA timezone for cost calculations, report times, and the schedule
+      (e.g., America/New_York, America/Los_Angeles, Europe/London). EventBridge
+      Scheduler requires canonical IANA names, not legacy aliases like US/Central.
 
 Globals:
   Function:
@@ -53,20 +56,18 @@ Resources:
           AI_SERVICE_MULTIPLIER: !Ref AIServiceMultiplier
           USER_TIMEZONE: !Ref UserTimezone
       Events:
-        ScheduledEvent:
-          Type: Schedule
+        DailySchedule:
+          # EventBridge Scheduler (ScheduleV2) so the time is expressed in the
+          # user's local timezone and stays fixed across daylight saving — no
+          # UTC drift. Runs once daily at 9 PM local time.
+          Type: ScheduleV2
           Properties:
             Name: cost-monitor-daily-schedule
-            Description: Trigger cost monitor at 7AM, 1PM, 6PM, 11PM CT
+            Description: Trigger cost monitor once daily at 9 PM local time
             # Cron format: cron(Minutes Hours Day-of-month Month Day-of-week Year)
-            # Central Time to UTC conversion:
-            # 7 AM CT = 1 PM UTC (CST) / 12 PM UTC (CDT)
-            # 1 PM CT = 7 PM UTC (CST) / 6 PM UTC (CDT)
-            # 6 PM CT = 12 AM UTC (CST) / 11 PM UTC (CDT)
-            # 11 PM CT = 5 AM UTC (CST) / 4 AM UTC (CDT)
-            # Using CST times (will shift 1 hour during DST)
-            Schedule: cron(0 13,19,0,5 * * ? *)
-            Enabled: true
+            ScheduleExpression: cron(0 21 * * ? *)
+            ScheduleExpressionTimezone: !Ref UserTimezone
+            State: ENABLED
       Policies:
         # Cost Explorer permissions
         - Version: '2012-10-17'
@@ -127,9 +128,9 @@ Outputs:
     Description: Name of the Cost Monitor Lambda function
     Value: !Ref CostMonitorFunction
   
-  ScheduleRuleName:
-    Description: Name of the EventBridge schedule rule
-    Value: cost-monitor-6-hour-schedule
+  ScheduleName:
+    Description: Name of the EventBridge Scheduler schedule
+    Value: cost-monitor-daily-schedule
   
   NextSteps:
     Description: Next steps to complete setup
